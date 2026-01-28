@@ -18,10 +18,30 @@ export function EventRecordingPanel() {
     eventTypes,
     addEventType,
     deleteEventType,
+
+    addPlayer,
   } = useEvents();
 
   const [newEventType, setNewEventType] = useState('');
   const [showAddInput, setShowAddInput] = useState(false);
+  const [newPlayerName, setNewPlayerName] = useState('');
+  const [showAddPlayerInput, setShowAddPlayerInput] = useState(false);
+  const handleAddPlayer = () => {
+    if (newPlayerName.trim()) {
+      addPlayer(newPlayerName.trim());
+      setNewPlayerName('');
+      setShowAddPlayerInput(false);
+    }
+  };
+
+  const handlePlayerKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleAddPlayer();
+    } else if (e.key === 'Escape') {
+      setNewPlayerName('');
+      setShowAddPlayerInput(false);
+    }
+  };
 
   const canRecord = selectedPlayer !== null && selectedEventType !== null && startLocation !== null;
 
@@ -68,7 +88,7 @@ export function EventRecordingPanel() {
         <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
           Player
         </label>
-        <div className="grid grid-cols-11 gap-1">
+        <div className="flex flex-wrap gap-1 items-center">
           {players.map((player) => (
             <button
               key={player.id}
@@ -85,6 +105,39 @@ export function EventRecordingPanel() {
               {player.id}
             </button>
           ))}
+          {showAddPlayerInput ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={newPlayerName}
+                onChange={(e) => setNewPlayerName(e.target.value)}
+                onKeyDown={handlePlayerKeyDown}
+                placeholder="Type name..."
+                className="px-2 py-1 rounded text-xs w-24 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                autoFocus
+              />
+              <button
+                onClick={handleAddPlayer}
+                className="p-1 rounded bg-green-500 text-white hover:bg-green-600"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => { setNewPlayerName(''); setShowAddPlayerInput(false); }}
+                className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAddPlayerInput(true)}
+              className="px-2 py-1 rounded text-xs font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600 flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              Add
+            </button>
+          )}
         </div>
       </div>
 

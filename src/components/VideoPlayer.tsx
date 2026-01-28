@@ -108,37 +108,52 @@ export function VideoPlayer() {
     setShowSourceMenu(false);
   };
 
+
   return (
     <div className="glass-card p-3 rounded-xl h-full flex flex-col">
-      <div className="mb-2 flex gap-2 items-center relative">
+      <div
+        className="relative flex-1 bg-black/50 rounded-lg overflow-hidden mb-2 min-h-0 group"
+      >
+        {/* Always-visible change source button */}
         <button
           type="button"
-          className="font-semibold text-sm cursor-pointer px-2 py-1 bg-transparent"
-          onClick={() => setShowSourceMenu((prev) => !prev)}
+          className="absolute top-2 right-2 z-40 px-2 py-1 rounded bg-gray-200/80 dark:bg-gray-800/80 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-700 shadow"
+          onClick={e => { e.stopPropagation(); setShowSourceMenu(true); }}
+          tabIndex={0}
+          aria-label="Change video source"
         >
-          Source
+          Change Source
         </button>
+        {/* Source selection overlay */}
         {showSourceMenu && (
-          <div className="absolute left-0 top-full mt-1 z-20 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded shadow-lg flex flex-col min-w-[120px]">
-            <button
-              type="button"
-              className="px-4 py-2 text-left hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-              onClick={() => handleSourceTypeSelect('local')}
-            >
-              Local File
-            </button>
-            <button
-              type="button"
-              className="px-4 py-2 text-left hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-              onClick={() => handleSourceTypeSelect('youtube')}
-            >
-              YouTube Link
-            </button>
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70">
+            <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded shadow-lg flex flex-col min-w-[180px] p-4 gap-2">
+              <button
+                type="button"
+                className="px-4 py-2 text-left hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                onClick={e => { e.stopPropagation(); handleSourceTypeSelect('local'); setShowSourceMenu(false); }}
+              >
+                Local File
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-left hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                onClick={e => { e.stopPropagation(); handleSourceTypeSelect('youtube'); setShowSourceMenu(false); }}
+              >
+                YouTube Link
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-left text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                onClick={e => { e.stopPropagation(); setShowSourceMenu(false); }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
-      </div>
 
-      <div className="relative flex-1 bg-black/50 rounded-lg overflow-hidden mb-2 min-h-0">
+        {/* Video/YouTube/Upload UI */}
         {sourceType === 'local' ? (
           !videoSrc ? (
             <label className="flex flex-col items-center justify-center w-full h-full cursor-pointer hover:bg-black/30 transition-colors">
@@ -162,7 +177,7 @@ export function VideoPlayer() {
         ) : sourceType === 'youtube' ? (
           <form
             onSubmit={handleYoutubeSubmit}
-            className="flex flex-col items-center justify-center w-full h-full gap-2"
+            className="flex flex-col items-center justify-center w-full h-full gap-2 relative z-10"
           >
             <input
               type="text"
@@ -194,7 +209,7 @@ export function VideoPlayer() {
             )}
           </form>
         ) : (
-          <div className="flex items-center justify-center w-full h-full text-gray-400 text-sm">Select a source to begin</div>
+          <div className="flex items-center justify-center w-full h-full text-gray-400 text-sm">Click to select a source</div>
         )}
       </div>
 

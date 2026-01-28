@@ -21,11 +21,15 @@ interface EventContextType {
   setCurrentVideoTime: (time: number) => void;
   players: Player[];
   updatePlayerName: (id: number, name: string) => void;
+  addPlayer: (name: string) => void;
   resetSelection: () => void;
   eventTypes: string[];
   addEventType: (type: string) => void;
   deleteEventType: (type: string) => void;
 }
+
+
+
 
 const EventContext = createContext<EventContextType | null>(null);
 
@@ -51,6 +55,13 @@ export function EventProvider({ children }: { children: ReactNode }) {
 
   const [selectedPlayer, setSelectedPlayer] = useState<number | null>(null);
   const [selectedEventType, setSelectedEventType] = useState<EventType | null>(null);
+
+  const addPlayer = useCallback((name: string) => {
+    setPlayers((prev: Player[]) => {
+      const nextId = prev.length > 0 ? Math.max(...prev.map((p: Player) => p.id)) + 1 : 1;
+      return [...prev, { id: nextId, name: name || `Player ${nextId}` }];
+    });
+  }, []);
   const [startLocation, setStartLocation] = useState<Position | null>(null);
   const [endLocation, setEndLocation] = useState<Position | null>(null);
   const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
@@ -138,6 +149,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
         setCurrentVideoTime,
         players,
         updatePlayerName,
+        addPlayer,
         resetSelection,
         eventTypes,
         addEventType,

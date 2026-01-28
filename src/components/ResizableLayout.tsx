@@ -46,6 +46,7 @@ export function DraggablePanel({ id, children, className = '' }: DraggablePanelP
   const isDragging = draggedPanel === id;
   const isDropTarget = dropTarget === id && draggedPanel !== id;
 
+  // Only the edge is draggable, but the whole panel is a drop target
   return (
     <div
       className={`
@@ -54,15 +55,71 @@ export function DraggablePanel({ id, children, className = '' }: DraggablePanelP
         ${isDropTarget ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-black' : ''}
         ${className}
       `}
-      draggable
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      style={{ cursor: 'grab' }}
-      title="Drag to swap panels"
     >
+      {/* Draggable edge overlay (8px wide on all sides) */}
+      <div
+        draggable
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 8,
+          cursor: 'grab',
+          zIndex: 10,
+        }}
+        title="Drag to swap panels"
+      />
+      <div
+        draggable
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 8,
+          cursor: 'grab',
+          zIndex: 10,
+        }}
+        title="Drag to swap panels"
+      />
+      <div
+        draggable
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: 8,
+          cursor: 'grab',
+          zIndex: 10,
+        }}
+        title="Drag to swap panels"
+      />
+      <div
+        draggable
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width: 8,
+          cursor: 'grab',
+          zIndex: 10,
+        }}
+        title="Drag to swap panels"
+      />
       {children}
     </div>
   );
