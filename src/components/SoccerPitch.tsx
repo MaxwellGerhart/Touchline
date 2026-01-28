@@ -173,15 +173,12 @@ export function SoccerPitch() {
               y2={`${dragEnd.y}%`}
               stroke="#FFD700"
               strokeWidth="2"
-              strokeDasharray="5,5"
-              className="animate-pulse"
             />
             <circle
               cx={`${dragStart.x}%`}
               cy={`${dragStart.y}%`}
               r="6"
               fill="#FFD700"
-              className="animate-pulse-marker"
             />
             <circle
               cx={`${dragEnd.x}%`}
@@ -211,7 +208,7 @@ export function SoccerPitch() {
                   cy={`${startLocation.y}%`}
                   r="8"
                   fill="#FFD700"
-                  className="animate-pulse-marker"
+                  opacity="0.6"
                 />
                 <circle
                   cx={`${endLocation.x}%`}
@@ -237,7 +234,7 @@ export function SoccerPitch() {
                 cy={`${startLocation.y}%`}
                 r="10"
                 fill="#FFD700"
-                className="animate-pulse-marker"
+                opacity="0.6"
               />
             )}
           </svg>
