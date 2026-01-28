@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Touchline Soccer Event Tracker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Touchline Soccer Event Tracker</h1>
+      <p>Capture match events with synchronized video timestamps.</p>
+    </header>
+
+    <main class="app-grid">
+      <section class="card video-section">
+        <h2>Video Player</h2>
+        <div class="video-controls">
+          <label class="file-upload">
+            Upload Match Video
+            <input id="videoUpload" type="file" accept="video/*" />
+          </label>
+          <div class="timestamp">
+            Timestamp: <span id="currentTimestamp">00:00</span>
+          </div>
+        </div>
+        <video id="matchVideo" controls></video>
+      </section>
+
+      <section class="card pitch-section">
+        <h2>Soccer Pitch</h2>
+        <p class="hint">Click the pitch to set the event location.</p>
+        <div id="pitch" class="pitch">
+          <div class="pitch-lines"></div>
+          <div id="pitchMarker" class="pitch-marker" aria-hidden="true"></div>
+        </div>
+        <div class="coordinates">
+          Selected: <span id="coordDisplay">X: 50% · Y: 50%</span>
+        </div>
+      </section>
+
+      <section class="card event-section">
+        <h2>Event Recording</h2>
+        <div class="panel-group">
+          <h3>Players</h3>
+          <div class="player-groups">
+            <div>
+              <p class="group-label">Home</p>
+              <div class="player-grid" id="homePlayers"></div>
+            </div>
+            <div>
+              <p class="group-label">Away</p>
+              <div class="player-grid" id="awayPlayers"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel-group">
+          <h3>Event Type</h3>
+          <div class="event-types" id="eventTypes"></div>
+        </div>
+        <button id="recordEvent" class="primary-button">Record Event</button>
+      </section>
+
+      <section class="card log-section">
+        <div class="log-header">
+          <h2>Event Log</h2>
+          <span id="eventCount">0 events</span>
+        </div>
+        <div id="eventLog" class="event-log"></div>
+      </section>
+
+      <section class="card data-section">
+        <h2>Data Management</h2>
+        <button id="exportCsv" class="secondary-button">Export to CSV</button>
+        <button id="clearEvents" class="danger-button">Clear All Events</button>
+        <p class="hint">Events are stored locally in your browser.</p>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
