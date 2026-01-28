@@ -89,48 +89,6 @@ export function SoccerPitch() {
     }
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
-  // Render arrow between two points
-  const renderArrow = (start: Position, end: Position, color: string, isAnimated: boolean = false) => {
-    const angle = Math.atan2(end.y - start.y, end.x - start.x);
-    const arrowLength = 2;
-    const arrowAngle = Math.PI / 6;
-    
-    const arrowPoint1 = {
-      x: end.x - arrowLength * Math.cos(angle - arrowAngle),
-      y: end.y - arrowLength * Math.sin(angle - arrowAngle),
-    };
-    const arrowPoint2 = {
-      x: end.x - arrowLength * Math.cos(angle + arrowAngle),
-      y: end.y - arrowLength * Math.sin(angle + arrowAngle),
-    };
-
-    return (
-      <g>
-        <line
-          x1={`${start.x}%`}
-          y1={`${start.y}%`}
-          x2={`${end.x}%`}
-          y2={`${end.y}%`}
-          stroke={color}
-          strokeWidth="2"
-          strokeDasharray={isAnimated ? "5,5" : "none"}
-          className={isAnimated ? "animate-pulse" : ""}
-        />
-        <polygon
-          points={`${end.x},${end.y} ${arrowPoint1.x},${arrowPoint1.y} ${arrowPoint2.x},${arrowPoint2.y}`}
-          fill={color}
-          transform={`translate(0,0)`}
-          style={{
-            transform: `translate(${end.x}%, ${end.y}%)`,
-            transformBox: 'fill-box',
-            transformOrigin: 'center',
-          }}
-        />
-        {/* Simplified arrow head using percentage positioning */}
-        <circle cx={`${end.x}%`} cy={`${end.y}%`} r="4" fill={color} />
-      </g>
-    );
-  };
 
   return (
     <div className="glass-card p-3 rounded-xl h-full flex flex-col">

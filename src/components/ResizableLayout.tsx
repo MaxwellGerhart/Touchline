@@ -1,5 +1,4 @@
 import React, { useCallback, useRef } from 'react';
-import { GripVertical } from 'lucide-react';
 import { useLayout, PanelId } from '../context/LayoutContext';
 
 interface DraggablePanelProps {

@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Trash2, Download, FileSpreadsheet } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
 import { formatTimestamp } from '../utils/formatters';

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, Dispatch, SetStateAction } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, Dispatch, SetStateAction } from 'react';
 
 export type PanelId = 'video' | 'pitch' | 'controls' | 'log';
 
