@@ -56,10 +56,10 @@ export function EventProvider({ children }: { children: ReactNode }) {
   const [selectedPlayer, setSelectedPlayer] = useState<number | null>(null);
   const [selectedEventType, setSelectedEventType] = useState<EventType | null>(null);
 
-  const addPlayer = useCallback((name: string) => {
+  const addPlayer = useCallback((id: number) => {
     setPlayers((prev: Player[]) => {
-      const nextId = prev.length > 0 ? Math.max(...prev.map((p: Player) => p.id)) + 1 : 1;
-      return [...prev, { id: nextId, name: name || `Player ${nextId}` }];
+      if (prev.some(p => p.id === id)) return prev; // Prevent duplicate IDs
+      return [...prev, { id, name: `Player ${id}` }];
     });
   }, []);
   const [startLocation, setStartLocation] = useState<Position | null>(null);

@@ -24,12 +24,14 @@ export function EventRecordingPanel() {
 
   const [newEventType, setNewEventType] = useState('');
   const [showAddInput, setShowAddInput] = useState(false);
-  const [newPlayerName, setNewPlayerName] = useState('');
+  const [newPlayerNumber, setNewPlayerNumber] = useState('');
   const [showAddPlayerInput, setShowAddPlayerInput] = useState(false);
+
   const handleAddPlayer = () => {
-    if (newPlayerName.trim()) {
-      addPlayer(newPlayerName.trim());
-      setNewPlayerName('');
+    const num = parseInt(newPlayerNumber.trim(), 10);
+    if (!isNaN(num) && num > 0) {
+      addPlayer(num);
+      setNewPlayerNumber('');
       setShowAddPlayerInput(false);
     }
   };
@@ -38,7 +40,7 @@ export function EventRecordingPanel() {
     if (e.key === 'Enter') {
       handleAddPlayer();
     } else if (e.key === 'Escape') {
-      setNewPlayerName('');
+      setNewPlayerNumber('');
       setShowAddPlayerInput(false);
     }
   };
@@ -108,11 +110,11 @@ export function EventRecordingPanel() {
           {showAddPlayerInput ? (
             <div className="flex items-center gap-1">
               <input
-                type="text"
-                value={newPlayerName}
-                onChange={(e) => setNewPlayerName(e.target.value)}
+                type="number"
+                value={newPlayerNumber}
+                onChange={(e) => setNewPlayerNumber(e.target.value)}
                 onKeyDown={handlePlayerKeyDown}
-                placeholder="Type name..."
+                placeholder="Type number..."
                 className="px-2 py-1 rounded text-xs w-24 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
                 autoFocus
               />
@@ -123,7 +125,7 @@ export function EventRecordingPanel() {
                 <Plus className="w-3 h-3" />
               </button>
               <button
-                onClick={() => { setNewPlayerName(''); setShowAddPlayerInput(false); }}
+                onClick={() => { setNewPlayerNumber(''); setShowAddPlayerInput(false); }}
                 className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
               >
                 <X className="w-3 h-3" />
