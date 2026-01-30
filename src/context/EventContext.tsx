@@ -21,7 +21,7 @@ interface EventContextType {
   setCurrentVideoTime: (time: number) => void;
   players: Player[];
   updatePlayerName: (id: number, name: string) => void;
-  addPlayer: (name: string) => void;
+  addPlayer: (id: number) => void;
   resetSelection: () => void;
   eventTypes: string[];
   addEventType: (type: string) => void;
