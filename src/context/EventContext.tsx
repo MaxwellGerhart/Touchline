@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { MatchEvent, EventType, Position, DEFAULT_PLAYERS, Player, DEFAULT_EVENT_TYPES } from '../types';
+import { MatchEvent, EventType, Position, DEFAULT_PLAYERS, Player, DEFAULT_EVENT_TYPES, TeamId, TeamNames, DEFAULT_TEAM_NAMES } from '../types';
 
 interface EventContextType {
   events: MatchEvent[];
@@ -8,7 +8,8 @@ interface EventContextType {
   deleteEvent: (id: string) => void;
   clearEvents: () => void;
   selectedPlayer: number | null;
-  setSelectedPlayer: (id: number | null) => void;
+  selectedTeam: TeamId | null;
+  setSelectedPlayer: (id: number | null, team?: TeamId | null) => void;
   selectedEventType: EventType | null;
   setSelectedEventType: (type: EventType | null) => void;
   startLocation: Position | null;
@@ -20,12 +21,15 @@ interface EventContextType {
   currentVideoTime: number;
   setCurrentVideoTime: (time: number) => void;
   players: Player[];
-  updatePlayerName: (id: number, name: string) => void;
-  addPlayer: (id: number) => void;
+  updatePlayerName: (id: number, name: string, team: TeamId) => void;
+  addPlayer: (id: number, team: TeamId, name?: string) => void;
+  removePlayer: (id: number, team: TeamId) => void;
   resetSelection: () => void;
   eventTypes: string[];
   addEventType: (type: string) => void;
   deleteEventType: (type: string) => void;
+  teamNames: TeamNames;
+  updateTeamName: (team: TeamId, name: string) => void;
 }
 
 
@@ -36,6 +40,7 @@ const EventContext = createContext<EventContextType | null>(null);
 const STORAGE_KEY = 'touchline_events';
 const PLAYERS_STORAGE_KEY = 'touchline_players';
 const EVENT_TYPES_STORAGE_KEY = 'touchline_event_types';
+const TEAM_NAMES_STORAGE_KEY = 'touchline_team_names';
 
 export function EventProvider({ children }: { children: ReactNode }) {
   const [events, setEvents] = useState<MatchEvent[]>(() => {
@@ -53,13 +58,25 @@ export function EventProvider({ children }: { children: ReactNode }) {
     return stored ? JSON.parse(stored) : DEFAULT_EVENT_TYPES;
   });
 
-  const [selectedPlayer, setSelectedPlayer] = useState<number | null>(null);
+  const [teamNames, setTeamNames] = useState<TeamNames>(() => {
+    const stored = localStorage.getItem(TEAM_NAMES_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : DEFAULT_TEAM_NAMES;
+  });
+
+  const [selectedPlayer, setSelectedPlayerState] = useState<number | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState<TeamId | null>(null);
   const [selectedEventType, setSelectedEventType] = useState<EventType | null>(null);
 
-  const addPlayer = useCallback((id: number) => {
+  const setSelectedPlayer = useCallback((id: number | null, team?: TeamId | null) => {
+    setSelectedPlayerState(id);
+    setSelectedTeam(team ?? null);
+  }, []);
+
+  const addPlayer = useCallback((id: number, team: TeamId, name?: string) => {
     setPlayers((prev: Player[]) => {
-      if (prev.some(p => p.id === id)) return prev; // Prevent duplicate IDs
-      return [...prev, { id, name: `Player ${id}` }];
+      // Prevent duplicate IDs within the same team
+      if (prev.some(p => p.id === id && p.team === team)) return prev;
+      return [...prev, { id, name: name?.trim() || `Player ${id}`, team }];
     });
   }, []);
   const [startLocation, setStartLocation] = useState<Position | null>(null);
@@ -82,6 +99,11 @@ export function EventProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(EVENT_TYPES_STORAGE_KEY, JSON.stringify(eventTypes));
   }, [eventTypes]);
 
+  // Persist team names to localStorage
+  useEffect(() => {
+    localStorage.setItem(TEAM_NAMES_STORAGE_KEY, JSON.stringify(teamNames));
+  }, [teamNames]);
+
   const addEvent = useCallback((eventData: Omit<MatchEvent, 'id' | 'createdAt'>) => {
     const newEvent: MatchEvent = {
       ...eventData,
@@ -103,8 +125,24 @@ export function EventProvider({ children }: { children: ReactNode }) {
     setHighlightedEventId(null);
   }, []);
 
-  const updatePlayerName = useCallback((id: number, name: string) => {
-    setPlayers(prev => prev.map(p => p.id === id ? { ...p, name } : p));
+  const updatePlayerName = useCallback((id: number, name: string, team: TeamId) => {
+    setPlayers(prev => prev.map(p => (p.id === id && p.team === team) ? { ...p, name } : p));
+  }, []);
+
+  const removePlayer = useCallback((id: number, team: TeamId) => {
+    setPlayers(prev => prev.filter(p => !(p.id === id && p.team === team)));
+    // Clear selection if the removed player was selected
+    if (selectedPlayer === id && selectedTeam === team) {
+      setSelectedPlayerState(null);
+      setSelectedTeam(null);
+    }
+  }, [selectedPlayer, selectedTeam]);
+
+  const updateTeamName = useCallback((team: TeamId, name: string) => {
+    setTeamNames(prev => ({
+      ...prev,
+      [team === 1 ? 'team1' : 'team2']: name,
+    }));
   }, []);
 
   const addEventType = useCallback((type: string) => {
@@ -122,7 +160,8 @@ export function EventProvider({ children }: { children: ReactNode }) {
   }, [selectedEventType]);
 
   const resetSelection = useCallback(() => {
-    setSelectedPlayer(null);
+    setSelectedPlayerState(null);
+    setSelectedTeam(null);
     setSelectedEventType(null);
     setStartLocation(null);
     setEndLocation(null);
@@ -136,6 +175,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
         deleteEvent,
         clearEvents,
         selectedPlayer,
+        selectedTeam,
         setSelectedPlayer,
         selectedEventType,
         setSelectedEventType,
@@ -150,10 +190,13 @@ export function EventProvider({ children }: { children: ReactNode }) {
         players,
         updatePlayerName,
         addPlayer,
+        removePlayer,
         resetSelection,
         eventTypes,
         addEventType,
         deleteEventType,
+        teamNames,
+        updateTeamName,
       }}
     >
       {children}

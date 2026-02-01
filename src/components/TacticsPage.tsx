@@ -58,7 +58,6 @@ export function TacticsPage() {
     setTool,
     state,
     formation,
-    setFormation,
     drawing,
     setDrawing,
     addPlayer,

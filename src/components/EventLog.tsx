@@ -11,6 +11,7 @@ export function EventLog() {
     highlightedEventId,
     setHighlightedEventId,
     resetSelection,
+    teamNames,
   } = useEvents();
 
   const handleEventClick = (eventId: string) => {
@@ -90,8 +91,11 @@ export function EventLog() {
                   <span className={`px-1.5 py-0.5 rounded text-xs font-medium text-white ${getEventTypeColor(event.eventType)}`}>
                     {event.eventType}
                   </span>
-                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    #{event.playerId}
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate" title={`${event.playerName} (${event.playerTeam === 1 ? teamNames.team1 : teamNames.team2})`}>
+                    #{event.playerId} {event.playerName}
+                  </span>
+                  <span className={`px-1 py-0.5 rounded text-xs font-medium ${event.playerTeam === 1 ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300' : 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300'}`}>
+                    {event.playerTeam === 1 ? teamNames.team1 : teamNames.team2}
                   </span>
                 </div>
                 <button

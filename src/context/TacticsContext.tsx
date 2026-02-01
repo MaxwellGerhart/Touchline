@@ -11,7 +11,6 @@ import {
   TacticsBoardState,
   TacticsScenario,
   TacticsPlayer,
-  TacticsObject,
   TacticsTool,
   BoardObjectType,
   FormationId,
