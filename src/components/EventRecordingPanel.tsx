@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, X, Edit2, Check, Eye, UserPlus, Target, Trash2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Plus, X, Edit2, Check, Eye, UserPlus, Target, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
 import { useDrill } from '../context/DrillContext';
 import { useSession } from '../context/SessionContext';

@@ -86,6 +86,7 @@ export const DEFAULT_EVENT_TYPES: string[] = [
 
   // Roster management
   export interface RosterPlayer {
+    id: string;
     number: number;
     name: string;
   }
