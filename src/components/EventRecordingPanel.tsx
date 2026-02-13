@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Plus, X, Edit2, Check, Eye, UserPlus, Target, Trash2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
 import { useDrill } from '../context/DrillContext';
-import { TeamId, Player, RosterPlayer, normalizePosition } from '../types';
+import { useSession } from '../context/SessionContext';
+import { TeamId, Player, RosterPlayer, distanceToGoal } from '../types';
 
 export function EventRecordingPanel() {
   const {
@@ -35,7 +36,8 @@ export function EventRecordingPanel() {
     addRosterPlayerToTeam,
   } = useEvents();
 
-  const { drillConfig, setDrillType, setDrillArea, clearDrill, isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive, setIsDrillActive } = useDrill();
+  const { isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive, setIsDrillActive, setDrawingForNewSession } = useDrill();
+  const { activeSession, updateSession } = useSession();
 
   const [newEventType, setNewEventType] = useState('');
   const [showAddInput, setShowAddInput] = useState(false);
@@ -144,10 +146,19 @@ export function EventRecordingPanel() {
       const player = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
       if (!player) return;
 
-      // Compute normalized (game-equivalent) coordinates if drill area is defined
-      const drillArea = drillConfig.area;
-      const normalizedStart = drillArea ? normalizePosition(startLocation, drillArea) : undefined;
-      const normalizedEnd = endLocation && drillArea ? normalizePosition(endLocation, drillArea) : undefined;
+      // Apply distance-to-goal X-shift based on which goal this player's team attacks
+      const drillArea = activeSession?.area ?? null;
+      const teamGoal = activeSession
+        ? (selectedTeam === 1 ? activeSession.team1Goal : activeSession.team2Goal)
+        : null;
+
+      let finalStart = startLocation;
+      let finalEnd = endLocation || undefined;
+
+      if (drillArea && teamGoal) {
+        finalStart = distanceToGoal(startLocation, drillArea, teamGoal);
+        finalEnd = endLocation ? distanceToGoal(endLocation, drillArea, teamGoal) : undefined;
+      }
 
       addEvent({
         videoTimestamp: currentVideoTime,
@@ -155,11 +166,10 @@ export function EventRecordingPanel() {
         playerName: player.name,
         playerTeam: selectedTeam,
         eventType: selectedEventType,
-        startLocation,
-        endLocation: endLocation || undefined,
-        normalizedStartLocation: normalizedStart,
-        normalizedEndLocation: normalizedEnd,
-        drillType: drillConfig.drillType || undefined,
+        startLocation: finalStart,
+        endLocation: finalEnd,
+        drillType: activeSession?.drillType || undefined,
+        sessionId: activeSession?.id,
       });
     }
 
@@ -604,70 +614,73 @@ export function EventRecordingPanel() {
         </div>
       </div>
 
-      {/* Drill Setup */}
+      {/* Session & Drill Area */}
       <div>
         <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
           <Target className="w-3 h-3 inline mr-1" />
-          Drill Setup
+          Session
+          {activeSession && (
+            <span className="ml-1.5 text-[10px] font-normal text-orange-600 dark:text-orange-400">
+              {activeSession.name} • T1→{activeSession.team1Goal} T2→{activeSession.team2Goal}
+            </span>
+          )}
         </label>
-        <div className="flex flex-col gap-1.5">
-          <input
-            type="text"
-            value={drillConfig.drillType}
-            onChange={(e) => setDrillType(e.target.value)}
-            placeholder="Drill type (e.g. Half-field 6v6)"
-            className="px-2 py-1 rounded text-xs w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-orange-400 dark:focus:ring-orange-500"
-          />
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setIsDrawingDrillArea(!isDrawingDrillArea)}
-              className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
-                isDrawingDrillArea
-                  ? 'bg-orange-500 text-white ring-1 ring-orange-500'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-              }`}
-              title={isDrawingDrillArea ? 'Cancel drawing' : 'Draw drill area on pitch'}
-            >
-              <Target className="w-3 h-3" />
-              {isDrawingDrillArea ? 'Drawing...' : 'Draw Area'}
-            </button>
-            {drillConfig.area && (
-              <>
-                <button
-                  onClick={() => setIsDrillActive(!isDrillActive)}
-                  className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
-                    isDrillActive
-                      ? 'bg-green-600 text-white ring-1 ring-green-600'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                  }`}
-                  title={isDrillActive ? 'Deactivate drill (return to full field)' : 'Activate drill (zoom into area)'}
-                >
-                  {isDrillActive ? <ZoomOut className="w-3 h-3" /> : <ZoomIn className="w-3 h-3" />}
-                  {isDrillActive ? 'Active' : 'Activate'}
-                </button>
-                <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                  {drillConfig.area.width.toFixed(0)}% x {drillConfig.area.height.toFixed(0)}%
-                </span>
-                <button
-                  onClick={() => setDrillArea(null)}
-                  className="p-1 rounded text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30"
-                  title="Remove drill area"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </>
-            )}
-            {(drillConfig.drillType || drillConfig.area) && (
+        {!activeSession ? (
+          <p className="text-xs text-gray-500 dark:text-gray-400 italic">No active session. Create one to configure a drill area.</p>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <input
+              type="text"
+              value={activeSession.drillType}
+              onChange={(e) => updateSession(activeSession.id, { drillType: e.target.value })}
+              placeholder="Drill type (e.g. Half-field 6v6)"
+              className="px-2 py-1 rounded text-xs w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-orange-400 dark:focus:ring-orange-500"
+            />
+            <div className="flex items-center gap-1.5">
               <button
-                onClick={clearDrill}
-                className="p-1 rounded text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 ml-auto"
-                title="Clear all drill setup"
+                onClick={() => {
+                  setDrawingForNewSession(false);
+                  setIsDrawingDrillArea(!isDrawingDrillArea);
+                }}
+                className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
+                  isDrawingDrillArea
+                    ? 'bg-orange-500 text-white ring-1 ring-orange-500'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+                title={isDrawingDrillArea ? 'Cancel drawing' : 'Draw drill area on pitch'}
               >
-                <Trash2 className="w-3 h-3" />
+                <Target className="w-3 h-3" />
+                {isDrawingDrillArea ? 'Drawing...' : activeSession.area ? 'Re-draw' : 'Draw Area'}
               </button>
-            )}
+              {activeSession.area && (
+                <>
+                  <button
+                    onClick={() => setIsDrillActive(!isDrillActive)}
+                    className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
+                      isDrillActive
+                        ? 'bg-green-600 text-white ring-1 ring-green-600'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    title={isDrillActive ? 'Deactivate drill (return to full field)' : 'Activate drill (zoom into area)'}
+                  >
+                    {isDrillActive ? <ZoomOut className="w-3 h-3" /> : <ZoomIn className="w-3 h-3" />}
+                    {isDrillActive ? 'Active' : 'Activate'}
+                  </button>
+                  <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                    {activeSession.area.width.toFixed(0)}% x {activeSession.area.height.toFixed(0)}%
+                  </span>
+                  <button
+                    onClick={() => { updateSession(activeSession.id, { area: null }); setIsDrillActive(false); }}
+                    className="p-1 rounded text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30"
+                    title="Remove drill area"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Status and Record Button */}

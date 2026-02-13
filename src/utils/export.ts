@@ -1,7 +1,7 @@
-import { MatchEvent, DrillConfig } from '../types';
+import { MatchEvent, Session } from '../types';
 import { formatTimestamp, formatDate } from './formatters';
 
-export function exportToCSV(events: MatchEvent[], drillConfig?: DrillConfig): void {
+export function exportToCSV(events: MatchEvent[], session?: Session | null): void {
   if (events.length === 0) {
     alert('No events to export');
     return;
@@ -19,11 +19,8 @@ export function exportToCSV(events: MatchEvent[], drillConfig?: DrillConfig): vo
     'Start Y',
     'End X',
     'End Y',
-    'Normalized Start X',
-    'Normalized Start Y',
-    'Normalized End X',
-    'Normalized End Y',
     'Drill Type',
+    'Session ID',
     'Created At',
   ];
 
@@ -39,20 +36,21 @@ export function exportToCSV(events: MatchEvent[], drillConfig?: DrillConfig): vo
     event.startLocation.y.toFixed(2),
     event.endLocation?.x.toFixed(2) ?? '',
     event.endLocation?.y.toFixed(2) ?? '',
-    event.normalizedStartLocation?.x.toFixed(2) ?? '',
-    event.normalizedStartLocation?.y.toFixed(2) ?? '',
-    event.normalizedEndLocation?.x.toFixed(2) ?? '',
-    event.normalizedEndLocation?.y.toFixed(2) ?? '',
     event.drillType ?? '',
+    event.sessionId ?? '',
     event.createdAt,
   ]);
 
-  // Build metadata header rows for the drill config
+  // Build metadata header rows for the drill config / session
   const metaLines: string[] = [];
-  if (drillConfig && (drillConfig.drillType || drillConfig.area)) {
-    metaLines.push(`"# Drill Type","${drillConfig.drillType || ''}"`);
-    if (drillConfig.area) {
-      metaLines.push(`"# Drill Area X","${drillConfig.area.x.toFixed(2)}","# Drill Area Y","${drillConfig.area.y.toFixed(2)}","# Drill Area Width","${drillConfig.area.width.toFixed(2)}","# Drill Area Height","${drillConfig.area.height.toFixed(2)}"`);
+  if (session) {
+    metaLines.push(`"# Session","${session.name}","# Session ID","${session.id}"`);
+    metaLines.push(`"# Team 1 Goal","${session.team1Goal}","# Team 2 Goal","${session.team2Goal}","# Created At","${session.createdAt}"`);
+    if (session.drillType) {
+      metaLines.push(`"# Drill Type","${session.drillType}"`);
+    }
+    if (session.area) {
+      metaLines.push(`"# Drill Area X","${session.area.x.toFixed(2)}","# Drill Area Y","${session.area.y.toFixed(2)}","# Drill Area Width","${session.area.width.toFixed(2)}","# Drill Area Height","${session.area.height.toFixed(2)}"`);
     }
     metaLines.push(''); // blank line separator
   }

@@ -1,91 +1,40 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { DrillConfig, DrillRectangle, DEFAULT_DRILL_CONFIG } from '../types';
+import { createContext, useContext, useState, ReactNode } from 'react';
+import { DrillRectangle } from '../types';
 
 interface DrillContextType {
-  drillConfig: DrillConfig;
-  setDrillType: (type: string) => void;
-  setDrillArea: (area: DrillRectangle | null) => void;
-  clearDrill: () => void;
+  /** Whether the user is currently drawing a drill area on the pitch */
   isDrawingDrillArea: boolean;
   setIsDrawingDrillArea: (drawing: boolean) => void;
+  /** Whether the pitch is zoomed into the active session's drill area */
   isDrillActive: boolean;
   setIsDrillActive: (active: boolean) => void;
+  /** Temporarily holds an area freshly drawn on the pitch (for session creation) */
+  pendingArea: DrillRectangle | null;
+  setPendingArea: (area: DrillRectangle | null) => void;
+  /** When true, completed drawing is for a new session — don't update active session */
+  drawingForNewSession: boolean;
+  setDrawingForNewSession: (v: boolean) => void;
 }
 
 const DrillContext = createContext<DrillContextType | null>(null);
 
-const DRILL_STORAGE_KEY = 'touchline_drill_config';
-const DRILL_ACTIVE_STORAGE_KEY = 'touchline_drill_active';
-
 export function DrillProvider({ children }: { children: ReactNode }) {
-  const [drillConfig, setDrillConfig] = useState<DrillConfig>(() => {
-    const stored = localStorage.getItem(DRILL_STORAGE_KEY);
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        return DEFAULT_DRILL_CONFIG;
-      }
-    }
-    return DEFAULT_DRILL_CONFIG;
-  });
-
   const [isDrawingDrillArea, setIsDrawingDrillArea] = useState(false);
-
-  const [isDrillActive, setIsDrillActiveState] = useState<boolean>(() => {
-    return localStorage.getItem(DRILL_ACTIVE_STORAGE_KEY) === 'true';
-  });
-
-  // Persist drill config to localStorage
-  useEffect(() => {
-    localStorage.setItem(DRILL_STORAGE_KEY, JSON.stringify(drillConfig));
-  }, [drillConfig]);
-
-  // Persist active state
-  useEffect(() => {
-    localStorage.setItem(DRILL_ACTIVE_STORAGE_KEY, String(isDrillActive));
-  }, [isDrillActive]);
-
-  // Deactivate if drill area is removed
-  useEffect(() => {
-    if (!drillConfig.area && isDrillActive) {
-      setIsDrillActiveState(false);
-    }
-  }, [drillConfig.area, isDrillActive]);
-
-  const setDrillType = useCallback((type: string) => {
-    setDrillConfig(prev => ({ ...prev, drillType: type }));
-  }, []);
-
-  const setDrillArea = useCallback((area: DrillRectangle | null) => {
-    setDrillConfig(prev => ({ ...prev, area }));
-  }, []);
-
-  const setIsDrillActive = useCallback((active: boolean) => {
-    // Can only activate when area exists
-    if (active && !drillConfig.area) return;
-    setIsDrillActiveState(active);
-    // Exit drawing mode when activating
-    if (active) setIsDrawingDrillArea(false);
-  }, [drillConfig.area]);
-
-  const clearDrill = useCallback(() => {
-    setDrillConfig(DEFAULT_DRILL_CONFIG);
-    setIsDrawingDrillArea(false);
-    setIsDrillActiveState(false);
-  }, []);
+  const [isDrillActive, setIsDrillActive] = useState(false);
+  const [pendingArea, setPendingArea] = useState<DrillRectangle | null>(null);
+  const [drawingForNewSession, setDrawingForNewSession] = useState(false);
 
   return (
     <DrillContext.Provider
       value={{
-        drillConfig,
-        setDrillType,
-        setDrillArea,
-        clearDrill,
         isDrawingDrillArea,
         setIsDrawingDrillArea,
         isDrillActive,
         setIsDrillActive,
+        pendingArea,
+        setPendingArea,
+        drawingForNewSession,
+        setDrawingForNewSession,
       }}
     >
       {children}

@@ -1,7 +1,7 @@
 
 import { Trash2, Download, FileSpreadsheet } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
-import { useDrill } from '../context/DrillContext';
+import { useSession } from '../context/SessionContext';
 import { formatTimestamp } from '../utils/formatters';
 import { exportToCSV } from '../utils/export';
 
@@ -15,7 +15,7 @@ export function EventLog() {
     teamNames,
   } = useEvents();
 
-  const { drillConfig } = useDrill();
+  const { activeSession } = useSession();
 
   const handleEventClick = (eventId: string) => {
     resetSelection();
@@ -23,7 +23,7 @@ export function EventLog() {
   };
 
   const handleExportCSV = () => {
-    exportToCSV(events, drillConfig);
+    exportToCSV(events, activeSession);
   };
 
   const getEventTypeColor = (type: string): string => {

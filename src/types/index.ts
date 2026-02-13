@@ -8,6 +8,22 @@ export interface Position {
 // Event type is now a string to allow custom types
 export type EventType = string;
 
+/** Which end of the drill area a goal sits on */
+export type GoalEnd = 'left' | 'right';
+
+/** A session groups drill config + events together */
+export interface Session {
+  id: string;
+  name: string;
+  drillType: string;
+  area: DrillRectangle | null;
+  /** Which goal Team 1 is attacking */
+  team1Goal: GoalEnd;
+  /** Which goal Team 2 is attacking */
+  team2Goal: GoalEnd;
+  createdAt: string; // ISO timestamp
+}
+
 export interface MatchEvent {
   id: string;
   videoTimestamp: number; // seconds
@@ -17,9 +33,8 @@ export interface MatchEvent {
   eventType: EventType;
   startLocation: Position;
   endLocation?: Position; // Optional for directional events
-  normalizedStartLocation?: Position; // Game-equivalent coordinates (mapped from drill area)
-  normalizedEndLocation?: Position;   // Game-equivalent coordinates (mapped from drill area)
   drillType?: string;                 // Drill type when event was recorded
+  sessionId?: string;                 // Session that owns this event
   createdAt: string; // ISO timestamp
 }
 
@@ -90,26 +105,28 @@ export interface DrillRectangle {
   height: number; // 0-100 percentage
 }
 
-export interface DrillConfig {
-  drillType: string;
-  area: DrillRectangle | null;
-}
 
-export const DEFAULT_DRILL_CONFIG: DrillConfig = {
-  drillType: '',
-  area: null,
-};
 
 /**
- * Normalize a raw pitch position (0-100) into canonical full-pitch coordinates
- * based on the drill rectangle. This maps the drill area onto the full pitch.
+ * Compute distance-to-goal for a position.
+ *
+ * X becomes abs(raw.x − goal edge of drill area).
+ * Y is kept unchanged.
+ *
+ * @param goalSide – which end has the goal ('left' | 'right')
  */
-export function normalizePosition(raw: Position, drillArea: DrillRectangle): Position {
-  const relX = (raw.x - drillArea.x) / drillArea.width;
-  const relY = (raw.y - drillArea.y) / drillArea.height;
+export function distanceToGoal(
+  raw: Position,
+  drillArea: DrillRectangle,
+  goalSide: 'left' | 'right',
+): Position {
+  const goalEdge = goalSide === 'right'
+    ? drillArea.x + drillArea.width
+    : drillArea.x;
+
   return {
-    x: Math.max(0, Math.min(100, relX * 100)),
-    y: Math.max(0, Math.min(100, relY * 100)),
+    x: Math.abs(raw.x - goalEdge),
+    y: raw.y,
   };
 }
 

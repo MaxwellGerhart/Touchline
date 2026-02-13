@@ -1,6 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useEvents } from '../context/EventContext';
 import { useDrill } from '../context/DrillContext';
+import { useSession } from '../context/SessionContext';
 import { Position, DrillRectangle } from '../types';
 
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
@@ -28,16 +29,28 @@ export function SoccerPitch() {
     events,
   } = useEvents();
 
-  const { drillConfig, setDrillArea, isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive } = useDrill();
+  const { isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive, setIsDrillActive, setPendingArea, drawingForNewSession, setDrawingForNewSession } = useDrill();
+  const { activeSession, updateSession } = useSession();
 
   const highlightedEvent = events.find(e => e.id === highlightedEventId);
 
+  // Drill area now lives on the active session
+  const drillArea = activeSession?.area ?? null;
+
   // Whether we are in zoomed drill mode (area exists and is activated)
-  const isZoomed = isDrillActive && !!drillConfig.area;
-  const drillArea = drillConfig.area;
+  const isZoomed = isDrillActive && !!drillArea;
+
+  // Auto-activate/deactivate drill zoom when switching sessions
+  useEffect(() => {
+    setIsDrillActive(!!activeSession?.area);
+  }, [activeSession?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Derive which sides have goals from per-team assignments
+  const hasLeftGoal = activeSession ? (activeSession.team1Goal === 'left' || activeSession.team2Goal === 'left') : false;
+  const hasRightGoal = activeSession ? (activeSession.team1Goal === 'right' || activeSession.team2Goal === 'right') : false;
 
   // Convert container-percentage click to full-pitch 0-100% coordinates.
-  // When zoomed, 0-100% of container maps to just the drill rectangle.
+  // When zoomed, 0-100% of container maps to the padded drill rectangle.
   const getPositionFromEvent = useCallback((e: React.MouseEvent | MouseEvent): Position | null => {
     if (!containerRef.current) return null;
     
@@ -83,12 +96,23 @@ export function SoccerPitch() {
     height: Math.abs(b.y - a.y),
   });
 
+  // Check whether a full-pitch position falls inside the drill rectangle
+  const isInsideDrillArea = useCallback((pos: Position): boolean => {
+    if (!drillArea) return true; // no drill = everything is valid
+    return (
+      pos.x >= drillArea.x &&
+      pos.x <= drillArea.x + drillArea.width &&
+      pos.y >= drillArea.y &&
+      pos.y <= drillArea.y + drillArea.height
+    );
+  }, [drillArea]);
+
   // ── Drill area resize: start drag on a corner handle ──
   const handleResizeStart = useCallback((e: React.MouseEvent, handle: ResizeHandle) => {
     e.stopPropagation();
     e.preventDefault();
-    if (!drillConfig.area) return;
-    const { x, y, width, height } = drillConfig.area;
+    if (!drillArea) return;
+    const { x, y, width, height } = drillArea;
     // The anchor is the corner opposite to the one being dragged
     const anchor: Record<ResizeHandle, Position> = {
       nw: { x: x + width, y: y + height },
@@ -98,7 +122,7 @@ export function SoccerPitch() {
     };
     setResizingHandle(handle);
     setResizeAnchor(anchor[handle]);
-  }, [drillConfig.area]);
+  }, [drillArea]);
 
   // ── Mouse down on pitch ──
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -114,7 +138,11 @@ export function SoccerPitch() {
         // Second click: finalise the rectangle
         const rect = buildRect(drillCorner1, pos);
         if (rect.width > 1 && rect.height > 1) {
-          setDrillArea(rect);
+          setPendingArea(rect);
+          if (!drawingForNewSession && activeSession) {
+            updateSession(activeSession.id, { area: rect });
+          }
+          setDrawingForNewSession(false);
         }
         setDrillCorner1(null);
         setDrillPreviewPos(null);
@@ -123,13 +151,15 @@ export function SoccerPitch() {
       return;
     }
 
-    // Normal event tagging drag
+    // Normal event tagging drag — reject if outside drill area when drill is active
+    if (isDrillActive && drillArea && !isInsideDrillArea(pos)) return;
+
     setIsDragging(true);
     setDragStart(pos);
     setDragEnd(null);
     setStartLocation(null);
     setEndLocation(null);
-  }, [getPositionFromEvent, setStartLocation, setEndLocation, isDrawingDrillArea, drillCorner1, setDrillArea, setIsDrawingDrillArea]);
+  }, [getPositionFromEvent, setStartLocation, setEndLocation, isDrawingDrillArea, drillCorner1, setIsDrawingDrillArea, isDrillActive, drillArea, isInsideDrillArea, setPendingArea, drawingForNewSession, activeSession, updateSession, setDrawingForNewSession]);
 
   // ── Mouse move (shared: event drag, drill preview, resize) ──
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -138,7 +168,7 @@ export function SoccerPitch() {
       if (pos) {
         const rect = buildRect(resizeAnchor, pos);
         if (rect.width > 1 && rect.height > 1) {
-          setDrillArea(rect);
+          if (activeSession) updateSession(activeSession.id, { area: rect });
         }
       }
       return;
@@ -152,7 +182,7 @@ export function SoccerPitch() {
       const pos = getPositionFromEvent(e);
       if (pos) setDragEnd(pos);
     }
-  }, [isDragging, isDrawingDrillArea, drillCorner1, resizingHandle, resizeAnchor, getPositionFromEvent, setDrillArea]);
+  }, [isDragging, isDrawingDrillArea, drillCorner1, resizingHandle, resizeAnchor, getPositionFromEvent, activeSession, updateSession]);
 
   // ── Mouse up ──
   const handleMouseUp = useCallback((e: MouseEvent) => {
@@ -162,7 +192,16 @@ export function SoccerPitch() {
       return;
     }
     if (isDragging && dragStart) {
-      const endPos = getPositionFromEvent(e);
+      let endPos = getPositionFromEvent(e);
+
+      // Clamp end position to drill area when drill is active
+      if (endPos && isDrillActive && drillArea) {
+        endPos = {
+          x: Math.max(drillArea.x, Math.min(drillArea.x + drillArea.width, endPos.x)),
+          y: Math.max(drillArea.y, Math.min(drillArea.y + drillArea.height, endPos.y)),
+        };
+      }
+
       if (endPos) {
         const distance = Math.sqrt(
           Math.pow(endPos.x - dragStart.x, 2) + Math.pow(endPos.y - dragStart.y, 2)
@@ -178,7 +217,7 @@ export function SoccerPitch() {
       setDragStart(null);
       setDragEnd(null);
     }
-  }, [isDragging, dragStart, resizingHandle, getPositionFromEvent, setStartLocation, setEndLocation]);
+  }, [isDragging, dragStart, resizingHandle, getPositionFromEvent, setStartLocation, setEndLocation, isDrillActive, drillArea]);
 
   // Cancel drill drawing on Escape
   useEffect(() => {
@@ -392,8 +431,8 @@ export function SoccerPitch() {
         })()}
 
         {/* Persisted drill area overlay with resize handles (only in full-field view) */}
-        {drillConfig.area && !isDrawingDrillArea && !isZoomed && (() => {
-          const area = drillConfig.area;
+        {drillArea && !isDrawingDrillArea && !isZoomed && (() => {
+          const area = drillArea;
           const handles = getHandlePositions(area);
           return (
             <svg className="absolute inset-0 w-full h-full" style={{ zIndex: 5 }}>
@@ -422,7 +461,7 @@ export function SoccerPitch() {
                 opacity="0.9"
                 pointerEvents="none"
               >
-                {drillConfig.drillType || 'Drill Area'}
+                {activeSession?.drillType || 'Drill Area'}
               </text>
               {/* Resize corner handles */}
               {(Object.entries(handles) as [ResizeHandle, Position][]).map(([key, pos]) => (
@@ -478,8 +517,66 @@ export function SoccerPitch() {
         {/* Zoomed drill mode indicator */}
         {isZoomed && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-orange-600/90 text-white text-xs font-bold px-3 py-1 rounded-full pointer-events-none z-20">
-            {drillConfig.drillType || 'Drill'} — Zoomed
+            {activeSession?.drillType || 'Drill'} — Zoomed
+            {activeSession && ` (T1→${activeSession.team1Goal} T2→${activeSession.team2Goal})`}
           </div>
+        )}
+
+        {/* Goal overlays when zoomed into drill area */}
+        {isZoomed && drillArea && (hasLeftGoal || hasRightGoal) && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 15 }} viewBox={svgViewBox} preserveAspectRatio="none">
+            <defs>
+              <pattern id="goalNetOverlay" patternUnits="userSpaceOnUse" width="0.6" height="0.6">
+                <rect width="0.6" height="0.6" fill="#f8f8f8" opacity="0.85" />
+                <line x1="0" y1="0" x2="0.6" y2="0" stroke="#bbb" strokeWidth="0.06" />
+                <line x1="0" y1="0" x2="0" y2="0.6" stroke="#bbb" strokeWidth="0.06" />
+              </pattern>
+            </defs>
+            {/* Left goal (if left or both) */}
+            {hasLeftGoal && (() => {
+              const gx = (drillArea.x / 100) * 105;
+              const gy = 30.34;
+              return (
+                <g>
+                  <rect x={gx - 3} y={gy} width="3" height="7.32" fill="url(#goalNetOverlay)" stroke="#ddd" strokeWidth="0.25" />
+                  <line x1={gx} y1={gy} x2={gx} y2={gy + 7.32} stroke="white" strokeWidth="0.5" />
+                  {/* Goal posts */}
+                  <circle cx={gx} cy={gy} r="0.25" fill="white" />
+                  <circle cx={gx} cy={gy + 7.32} r="0.25" fill="white" />
+                </g>
+              );
+            })()}
+            {/* Right goal (if right or both) */}
+            {hasRightGoal && (() => {
+              const gx = ((drillArea.x + drillArea.width) / 100) * 105;
+              const gy = 30.34;
+              return (
+                <g>
+                  <rect x={gx} y={gy} width="3" height="7.32" fill="url(#goalNetOverlay)" stroke="#ddd" strokeWidth="0.25" />
+                  <line x1={gx} y1={gy} x2={gx} y2={gy + 7.32} stroke="white" strokeWidth="0.5" />
+                  {/* Goal posts */}
+                  <circle cx={gx} cy={gy} r="0.25" fill="white" />
+                  <circle cx={gx} cy={gy + 7.32} r="0.25" fill="white" />
+                </g>
+              );
+            })()}
+          </svg>
+        )}
+
+        {/* Drill area boundary in zoomed view */}
+        {isZoomed && drillArea && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 12 }} viewBox={svgViewBox} preserveAspectRatio="none">
+            <rect
+              x={(drillArea.x / 100) * 105}
+              y={(drillArea.y / 100) * 68}
+              width={(drillArea.width / 100) * 105}
+              height={(drillArea.height / 100) * 68}
+              fill="none"
+              stroke="rgba(255,165,0,0.5)"
+              strokeWidth="0.3"
+              strokeDasharray="1.5 0.8"
+            />
+          </svg>
         )}
 
         
