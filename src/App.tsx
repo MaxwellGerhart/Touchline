@@ -5,12 +5,9 @@ import { ThemeProvider } from './context/ThemeContext';
 import { LayoutProvider } from './context/LayoutContext';
 import { useLayout } from './context/LayoutContext';
 import { TaggingPage } from './components/TaggingPage';
-import { TacticsPage } from './components/TacticsPage';
-import { ReplayPage } from './components/ReplayPage';
 import { ThemeToggle } from './components/ThemeToggle';
-import { TacticsProvider } from './context/TacticsContext';
-
-type AppPage = 'tagging' | 'tactics' | 'replay';
+import { RosterManager } from './components/RosterManager';
+type AppPage = 'tagging';
 
 function HeaderActions() {
   const { setLeftColumnWidth, setLeftTopHeight, setRightTopHeight } = useLayout();
@@ -62,29 +59,11 @@ function AppContent() {
             >
               Tagging
             </button>
-            <button
-              onClick={() => setPage('tactics')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                page === 'tactics'
-                  ? 'bg-navy text-white dark:bg-rose-500 dark:text-white'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'
-              }`}
-            >
-              Tactics
-            </button>
-            <button
-              onClick={() => setPage('replay')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                page === 'replay'
-                  ? 'bg-navy text-white dark:bg-rose-500 dark:text-white'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'
-              }`}
-            >
-              Replay
-            </button>
+            {/* Removed Tactics and Replay buttons */}
           </nav>
         </div>
         <div className="flex items-center gap-2">
+          <RosterManager />
           {page === 'tagging' && <HeaderActions />}
           <ThemeToggle />
         </div>
@@ -93,12 +72,7 @@ function AppContent() {
       {/* Page content */}
       <div className="flex-1 flex flex-col min-h-0">
         {page === 'tagging' && <TaggingPage />}
-        {page === 'tactics' && (
-          <TacticsProvider>
-            <TacticsPage />
-          </TacticsProvider>
-        )}
-        {page === 'replay' && <ReplayPage />}
+        {/* Removed Tactics and Replay pages */}
       </div>
     </div>
   );

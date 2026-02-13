@@ -94,10 +94,10 @@ export function SoccerPitch() {
     <div className="glass-card p-3 rounded-xl h-full flex flex-col">
       <div
         ref={containerRef}
-        className="relative w-full flex-1 rounded-lg overflow-hidden cursor-crosshair select-none"
+        className="relative w-full flex-1 rounded-lg overflow-hidden cursor-crosshair select-none shadow-lg"
         onMouseDown={handleMouseDown}
         style={{
-          background: 'linear-gradient(to bottom, #2E8B57 0%, #228B22 25%, #2E8B57 50%, #228B22 75%, #2E8B57 100%)',
+          background: '#2E8B57',
           minHeight: '120px',
         }}
       >
@@ -107,60 +107,80 @@ export function SoccerPitch() {
           viewBox="0 0 105 68"
           preserveAspectRatio="none"
         >
-
+          <defs>
+            {/* Grass stripe pattern */}
+            <pattern id="grassStripesTagging" patternUnits="userSpaceOnUse" width="10.5" height="68">
+              <rect x="0" y="0" width="5.25" height="68" fill="#2E8B57" />
+              <rect x="5.25" y="0" width="5.25" height="68" fill="#268B4D" />
+            </pattern>
+            {/* Goal net pattern */}
+            <pattern id="goalNetTagging" patternUnits="userSpaceOnUse" width="0.4" height="0.4">
+              <rect width="0.4" height="0.4" fill="#f8f8f8" />
+              <line x1="0" y1="0" x2="0.4" y2="0" stroke="#ccc" strokeWidth="0.05" />
+              <line x1="0" y1="0" x2="0" y2="0.4" stroke="#ccc" strokeWidth="0.05" />
+            </pattern>
+            {/* Line glow effect */}
+            <filter id="lineGlowTagging" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="0.15" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
           
-          {/* Center line */}
-          <line x1="52.5" y1="0" x2="52.5" y2="68" stroke="white" strokeWidth="0.3" />
+          {/* Grass stripes background */}
+          <rect x="0" y="0" width="105" height="68" fill="url(#grassStripesTagging)" />
+          
+          {/* Pitch outline */}
+          <rect x="0.15" y="0.15" width="104.7" height="67.7" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.35" filter="url(#lineGlowTagging)" />
+          
+          {/* Halfway line */}
+          <line x1="52.5" y1="0" x2="52.5" y2="68" stroke="white" strokeWidth="0.5" />
           
           {/* Center circle */}
-          <circle cx="52.5" cy="34" r="9.15" fill="none" stroke="white" strokeWidth="0.3" />
+          <circle cx="52.5" cy="34" r="9.15" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
           
           {/* Center spot */}
-          <circle cx="52.5" cy="34" r="0.5" fill="white" />
+          <circle cx="52.5" cy="34" r="0.4" fill="white" />
           
           {/* Left penalty area */}
-          <rect x="0" y="13.84" width="16.5" height="40.32" fill="none" stroke="white" strokeWidth="0.3" />
+          <rect x="0" y="13.84" width="16.5" height="40.32" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
           
           {/* Left goal area */}
-          <rect x="0" y="24.84" width="5.5" height="18.32" fill="none" stroke="white" strokeWidth="0.3" />
+          <rect x="0" y="24.84" width="5.5" height="18.32" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
           
           {/* Left penalty spot */}
-          <circle cx="11" cy="34" r="0.5" fill="white" />
+          <circle cx="11" cy="34" r="0.35" fill="white" />
           
           {/* Left penalty arc */}
-          <path
-            d="M 16.5 27.5 A 9.15 9.15 0 0 1 16.5 40.5"
-            fill="none"
-            stroke="white"
-            strokeWidth="0.3"
-          />
+          <path d="M 16.5 27.5 A 9.15 9.15 0 0 1 16.5 40.5" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
           
           {/* Right penalty area */}
-          <rect x="88.5" y="13.84" width="16.5" height="40.32" fill="none" stroke="white" strokeWidth="0.3" />
+          <rect x="88.5" y="13.84" width="16.5" height="40.32" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
           
           {/* Right goal area */}
-          <rect x="99.5" y="24.84" width="5.5" height="18.32" fill="none" stroke="white" strokeWidth="0.3" />
+          <rect x="99.5" y="24.84" width="5.5" height="18.32" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
           
           {/* Right penalty spot */}
-          <circle cx="94" cy="34" r="0.5" fill="white" />
+          <circle cx="94" cy="34" r="0.35" fill="white" />
           
           {/* Right penalty arc */}
-          <path
-            d="M 88.5 27.5 A 9.15 9.15 0 0 0 88.5 40.5"
-            fill="none"
-            stroke="white"
-            strokeWidth="0.3"
-          />
+          <path d="M 88.5 27.5 A 9.15 9.15 0 0 0 88.5 40.5" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
           
-          {/* Corner arcs - bigger radius */}
-          <path d="M 0 2 A 2 2 0 0 0 2 0" fill="none" stroke="white" strokeWidth="0.3" />
-          <path d="M 103 0 A 2 2 0 0 0 105 2" fill="none" stroke="white" strokeWidth="0.3" />
-          <path d="M 0 66 A 2 2 0 0 1 2 68" fill="none" stroke="white" strokeWidth="0.3" />
-          <path d="M 105 66 A 2 2 0 0 0 103 68" fill="none" stroke="white" strokeWidth="0.3" />
+          {/* Corner arcs */}
+          <path d="M 0 1.5 A 1.5 1.5 0 0 0 1.5 0" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
+          <path d="M 103.5 0 A 1.5 1.5 0 0 0 105 1.5" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
+          <path d="M 0 66.5 A 1.5 1.5 0 0 1 1.5 68" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
+          <path d="M 105 66.5 A 1.5 1.5 0 0 0 103.5 68" fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth="0.25" filter="url(#lineGlowTagging)" />
           
-          {/* Goals */}
-          <rect x="-2" y="30.34" width="2" height="7.32" fill="none" stroke="white" strokeWidth="0.3" />
-          <rect x="105" y="30.34" width="2" height="7.32" fill="none" stroke="white" strokeWidth="0.3" />
+          {/* Left goal with net */}
+          <rect x="-2.5" y="30.34" width="2.5" height="7.32" fill="url(#goalNetTagging)" stroke="#ddd" strokeWidth="0.2" />
+          <line x1="0" y1="30.34" x2="0" y2="37.66" stroke="white" strokeWidth="0.4" />
+          
+          {/* Right goal with net */}
+          <rect x="105" y="30.34" width="2.5" height="7.32" fill="url(#goalNetTagging)" stroke="#ddd" strokeWidth="0.2" />
+          <line x1="105" y1="30.34" x2="105" y2="37.66" stroke="white" strokeWidth="0.4" />
         </svg>
 
         {/* Real-time drag preview */}

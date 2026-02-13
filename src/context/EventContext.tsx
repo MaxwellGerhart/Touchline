@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { MatchEvent, EventType, Position, DEFAULT_PLAYERS, Player, DEFAULT_EVENT_TYPES, TeamId, TeamNames, DEFAULT_TEAM_NAMES } from '../types';
+import { MatchEvent, EventType, Position, DEFAULT_PLAYERS, Player, DEFAULT_EVENT_TYPES, TeamId, TeamNames, DEFAULT_TEAM_NAMES, PlayerDisplayMode, Roster, RosterPlayer } from '../types';
 
 interface EventContextType {
   events: MatchEvent[];
@@ -30,6 +30,21 @@ interface EventContextType {
   deleteEventType: (type: string) => void;
   teamNames: TeamNames;
   updateTeamName: (team: TeamId, name: string) => void;
+  playerDisplayMode: PlayerDisplayMode;
+  cyclePlayerDisplayMode: () => void;
+  // Roster management
+  rosters: Roster[];
+  activeRosterId: string | null;
+  activeRoster: Roster | null;
+  createRoster: (name: string) => Roster;
+  deleteRoster: (id: string) => void;
+  renameRoster: (id: string, name: string) => void;
+  addPlayerToRoster: (rosterId: string, number: number, name: string) => void;
+  removePlayerFromRoster: (rosterId: string, playerId: string) => void;
+  updateRosterPlayer: (rosterId: string, playerId: string, number: number, name: string) => void;
+  setActiveRosterId: (id: string | null) => void;
+  addRosterPlayerToTeam: (rosterPlayer: RosterPlayer, team: TeamId) => void;
+  setPlayers: (players: Player[]) => void;
 }
 
 
@@ -41,6 +56,9 @@ const STORAGE_KEY = 'touchline_events';
 const PLAYERS_STORAGE_KEY = 'touchline_players';
 const EVENT_TYPES_STORAGE_KEY = 'touchline_event_types';
 const TEAM_NAMES_STORAGE_KEY = 'touchline_team_names';
+const PLAYER_DISPLAY_MODE_STORAGE_KEY = 'touchline_player_display_mode';
+const ROSTERS_STORAGE_KEY = 'touchline_rosters';
+const ACTIVE_ROSTER_STORAGE_KEY = 'touchline_active_roster';
 
 export function EventProvider({ children }: { children: ReactNode }) {
   const [events, setEvents] = useState<MatchEvent[]>(() => {
@@ -61,6 +79,20 @@ export function EventProvider({ children }: { children: ReactNode }) {
   const [teamNames, setTeamNames] = useState<TeamNames>(() => {
     const stored = localStorage.getItem(TEAM_NAMES_STORAGE_KEY);
     return stored ? JSON.parse(stored) : DEFAULT_TEAM_NAMES;
+  });
+
+  const [playerDisplayMode, setPlayerDisplayMode] = useState<PlayerDisplayMode>(() => {
+    const stored = localStorage.getItem(PLAYER_DISPLAY_MODE_STORAGE_KEY);
+    return (stored === 'number' || stored === 'name' || stored === 'both') ? stored : 'number';
+  });
+
+  const [rosters, setRosters] = useState<Roster[]>(() => {
+    const stored = localStorage.getItem(ROSTERS_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  });
+
+  const [activeRosterId, setActiveRosterId] = useState<string | null>(() => {
+    return localStorage.getItem(ACTIVE_ROSTER_STORAGE_KEY) || null;
   });
 
   const [selectedPlayer, setSelectedPlayerState] = useState<number | null>(null);
@@ -103,6 +135,86 @@ export function EventProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(TEAM_NAMES_STORAGE_KEY, JSON.stringify(teamNames));
   }, [teamNames]);
+
+  // Persist player display mode to localStorage
+  useEffect(() => {
+    localStorage.setItem(PLAYER_DISPLAY_MODE_STORAGE_KEY, playerDisplayMode);
+  }, [playerDisplayMode]);
+
+  const cyclePlayerDisplayMode = useCallback(() => {
+    setPlayerDisplayMode(prev => {
+      if (prev === 'number') return 'name';
+      if (prev === 'name') return 'both';
+      return 'number';
+    });
+  }, []);
+
+  // Persist rosters to localStorage
+  useEffect(() => {
+    localStorage.setItem(ROSTERS_STORAGE_KEY, JSON.stringify(rosters));
+  }, [rosters]);
+
+  // Persist active roster id to localStorage
+  useEffect(() => {
+    if (activeRosterId) {
+      localStorage.setItem(ACTIVE_ROSTER_STORAGE_KEY, activeRosterId);
+    } else {
+      localStorage.removeItem(ACTIVE_ROSTER_STORAGE_KEY);
+    }
+  }, [activeRosterId]);
+
+  const activeRoster = rosters.find(r => r.id === activeRosterId) || null;
+
+  const createRoster = useCallback((name: string): Roster => {
+    const newRoster: Roster = {
+      id: uuidv4(),
+      name: name.trim(),
+      players: [],
+      createdAt: new Date().toISOString(),
+    };
+    setRosters(prev => [...prev, newRoster]);
+    return newRoster;
+  }, []);
+
+  const deleteRoster = useCallback((id: string) => {
+    setRosters(prev => prev.filter(r => r.id !== id));
+    if (activeRosterId === id) {
+      setActiveRosterId(null);
+    }
+  }, [activeRosterId]);
+
+  const renameRoster = useCallback((id: string, name: string) => {
+    setRosters(prev => prev.map(r => r.id === id ? { ...r, name: name.trim() } : r));
+  }, []);
+
+  const addPlayerToRoster = useCallback((rosterId: string, number: number, name: string) => {
+    setRosters(prev => prev.map(r => {
+      if (r.id !== rosterId) return r;
+      const newPlayer: RosterPlayer = { id: uuidv4(), number, name: name.trim() || `Player ${number}` };
+      return { ...r, players: [...r.players, newPlayer] };
+    }));
+  }, []);
+
+  const removePlayerFromRoster = useCallback((rosterId: string, playerId: string) => {
+    setRosters(prev => prev.map(r => {
+      if (r.id !== rosterId) return r;
+      return { ...r, players: r.players.filter(p => p.id !== playerId) };
+    }));
+  }, []);
+
+  const updateRosterPlayer = useCallback((rosterId: string, playerId: string, number: number, name: string) => {
+    setRosters(prev => prev.map(r => {
+      if (r.id !== rosterId) return r;
+      return { ...r, players: r.players.map(p => p.id === playerId ? { ...p, number, name: name.trim() } : p) };
+    }));
+  }, []);
+
+  const addRosterPlayerToTeam = useCallback((rosterPlayer: RosterPlayer, team: TeamId) => {
+    setPlayers((prev: Player[]) => {
+      if (prev.some(p => p.id === rosterPlayer.number && p.team === team)) return prev;
+      return [...prev, { id: rosterPlayer.number, name: rosterPlayer.name, team }];
+    });
+  }, []);
 
   const addEvent = useCallback((eventData: Omit<MatchEvent, 'id' | 'createdAt'>) => {
     const newEvent: MatchEvent = {
@@ -197,6 +309,20 @@ export function EventProvider({ children }: { children: ReactNode }) {
         deleteEventType,
         teamNames,
         updateTeamName,
+        playerDisplayMode,
+        cyclePlayerDisplayMode,
+        rosters,
+        activeRosterId,
+        activeRoster,
+        createRoster,
+        deleteRoster,
+        renameRoster,
+        addPlayerToRoster,
+        removePlayerFromRoster,
+        updateRosterPlayer,
+        setActiveRosterId,
+        addRosterPlayerToTeam,
+        setPlayers,
       }}
     >
       {children}

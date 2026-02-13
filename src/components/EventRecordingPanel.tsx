@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Plus, X, Edit2, Check } from 'lucide-react';
+import { Plus, X, Edit2, Check, Eye, UserPlus } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
-import { TeamId } from '../types';
+import { TeamId, Player, RosterPlayer } from '../types';
 
 export function EventRecordingPanel() {
   const {
@@ -24,6 +24,10 @@ export function EventRecordingPanel() {
     removePlayer,
     teamNames,
     updateTeamName,
+    playerDisplayMode,
+    cyclePlayerDisplayMode,
+    activeRoster,
+    addRosterPlayerToTeam,
   } = useEvents();
 
   const [newEventType, setNewEventType] = useState('');
@@ -32,11 +36,42 @@ export function EventRecordingPanel() {
   const [newPlayerName, setNewPlayerName] = useState('');
   const [showAddPlayerInputTeam1, setShowAddPlayerInputTeam1] = useState(false);
   const [showAddPlayerInputTeam2, setShowAddPlayerInputTeam2] = useState(false);
+  const [showRosterPickerTeam1, setShowRosterPickerTeam1] = useState(false);
+  const [showRosterPickerTeam2, setShowRosterPickerTeam2] = useState(false);
+  const [rosterSearch, setRosterSearch] = useState('');
   const [editingTeam, setEditingTeam] = useState<TeamId | null>(null);
   const [editTeamName, setEditTeamName] = useState('');
 
   const team1Players = players.filter(p => p.team === 1);
   const team2Players = players.filter(p => p.team === 2);
+
+  // Get roster players not yet on the given team
+  const getAvailableRosterPlayers = (team: TeamId) => {
+    if (!activeRoster) return [];
+    const teamPlayers = players.filter(p => p.team === team);
+    return activeRoster.players.filter(
+      rp => !teamPlayers.some(tp => tp.id === rp.number)
+    );
+  };
+
+  const filteredRosterPlayers = (team: TeamId) => {
+    const available = getAvailableRosterPlayers(team);
+    if (!rosterSearch.trim()) return available;
+    const q = rosterSearch.toLowerCase();
+    return available.filter(p => p.name.toLowerCase().includes(q) || String(p.number).includes(q));
+  };
+
+  const handleAddFromRoster = (rosterPlayer: RosterPlayer, team: TeamId) => {
+    addRosterPlayerToTeam(rosterPlayer, team);
+  };
+
+  const getPlayerLabel = (player: Player) => {
+    switch (playerDisplayMode) {
+      case 'name': return player.name;
+      case 'both': return `${player.id} ${player.name}`;
+      default: return String(player.id);
+    }
+  };
 
   const handleAddPlayer = (team: TeamId) => {
     const num = parseInt(newPlayerNumber.trim(), 10);
@@ -125,9 +160,19 @@ export function EventRecordingPanel() {
     <div className="glass-card p-3 rounded-xl h-full flex flex-col gap-2 overflow-auto">
       {/* Player Selection */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-          Player
-        </label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+            Player
+          </label>
+          <button
+            onClick={cyclePlayerDisplayMode}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+            title={`Display: ${playerDisplayMode}. Click to cycle.`}
+          >
+            <Eye className="w-3 h-3" />
+            {playerDisplayMode === 'number' ? '#' : playerDisplayMode === 'name' ? 'Aa' : '# Aa'}
+          </button>
+        </div>
         <div className="flex flex-col gap-1">
           {/* Team 1 Row */}
           <div className="flex items-center gap-1">
@@ -176,7 +221,7 @@ export function EventRecordingPanel() {
                   `}
                   title={player.name}
                 >
-                  {player.id}
+                  {getPlayerLabel(player)}
                 </button>
                 <button
                   onClick={(e) => {
@@ -222,13 +267,59 @@ export function EventRecordingPanel() {
                   <X className="w-3 h-3" />
                 </button>
               </div>
+            ) : showRosterPickerTeam1 && activeRoster ? (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={rosterSearch}
+                    onChange={(e) => setRosterSearch(e.target.value)}
+                    placeholder="Search roster..."
+                    className="px-2 py-1 rounded text-xs w-28 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => { setShowRosterPickerTeam1(false); setRosterSearch(''); }}
+                    className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-24 overflow-auto">
+                  {filteredRosterPlayers(1).map((rp) => (
+                    <button
+                      key={rp.id}
+                      onClick={() => { handleAddFromRoster(rp, 1); }}
+                      className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800"
+                      title={`${rp.number} - ${rp.name}`}
+                    >
+                      #{rp.number} {rp.name}
+                    </button>
+                  ))}
+                  {filteredRosterPlayers(1).length === 0 && (
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 py-1">No available players</span>
+                  )}
+                </div>
+              </div>
             ) : (
-              <button
-                onClick={() => setShowAddPlayerInputTeam1(true)}
-                className="p-1.5 rounded text-sm font-bold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600 flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" />
-              </button>
+              <div className="flex items-center gap-1">
+                {activeRoster && (
+                  <button
+                    onClick={() => { setShowRosterPickerTeam1(true); setRosterSearch(''); }}
+                    className="p-1.5 rounded text-sm font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 flex items-center gap-1"
+                    title="Add from roster"
+                  >
+                    <UserPlus className="w-3 h-3" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowAddPlayerInputTeam1(true)}
+                  className="p-1.5 rounded text-sm font-bold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600 flex items-center gap-1"
+                  title="Add custom player"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
             )}
           </div>
 
@@ -279,7 +370,7 @@ export function EventRecordingPanel() {
                   `}
                   title={player.name}
                 >
-                  {player.id}
+                  {getPlayerLabel(player)}
                 </button>
                 <button
                   onClick={(e) => {
@@ -325,13 +416,59 @@ export function EventRecordingPanel() {
                   <X className="w-3 h-3" />
                 </button>
               </div>
+            ) : showRosterPickerTeam2 && activeRoster ? (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={rosterSearch}
+                    onChange={(e) => setRosterSearch(e.target.value)}
+                    placeholder="Search roster..."
+                    className="px-2 py-1 rounded text-xs w-28 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => { setShowRosterPickerTeam2(false); setRosterSearch(''); }}
+                    className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-24 overflow-auto">
+                  {filteredRosterPlayers(2).map((rp) => (
+                    <button
+                      key={rp.id}
+                      onClick={() => { handleAddFromRoster(rp, 2); }}
+                      className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-800"
+                      title={`${rp.number} - ${rp.name}`}
+                    >
+                      #{rp.number} {rp.name}
+                    </button>
+                  ))}
+                  {filteredRosterPlayers(2).length === 0 && (
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 py-1">No available players</span>
+                  )}
+                </div>
+              </div>
             ) : (
-              <button
-                onClick={() => setShowAddPlayerInputTeam2(true)}
-                className="p-1.5 rounded text-sm font-bold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600 flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" />
-              </button>
+              <div className="flex items-center gap-1">
+                {activeRoster && (
+                  <button
+                    onClick={() => { setShowRosterPickerTeam2(true); setRosterSearch(''); }}
+                    className="p-1.5 rounded text-sm font-bold bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-800 flex items-center gap-1"
+                    title="Add from roster"
+                  >
+                    <UserPlus className="w-3 h-3" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowAddPlayerInputTeam2(true)}
+                  className="p-1.5 rounded text-sm font-bold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600 flex items-center gap-1"
+                  title="Add custom player"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
             )}
           </div>
         </div>
