@@ -1,12 +1,23 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useEvents } from '../context/EventContext';
-import { Position } from '../types';
+import { useDrill } from '../context/DrillContext';
+import { Position, DrillRectangle } from '../types';
+
+type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
 
 export function SoccerPitch() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<Position | null>(null);
   const [dragEnd, setDragEnd] = useState<Position | null>(null);
+
+  // Drill area: two-click drawing state
+  const [drillCorner1, setDrillCorner1] = useState<Position | null>(null);
+  const [drillPreviewPos, setDrillPreviewPos] = useState<Position | null>(null);
+
+  // Drill area: resize state
+  const [resizingHandle, setResizingHandle] = useState<ResizeHandle | null>(null);
+  const [resizeAnchor, setResizeAnchor] = useState<Position | null>(null);
   
   const {
     startLocation,
@@ -17,69 +28,175 @@ export function SoccerPitch() {
     events,
   } = useEvents();
 
+  const { drillConfig, setDrillArea, isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive } = useDrill();
+
   const highlightedEvent = events.find(e => e.id === highlightedEventId);
 
+  // Whether we are in zoomed drill mode (area exists and is activated)
+  const isZoomed = isDrillActive && !!drillConfig.area;
+  const drillArea = drillConfig.area;
+
+  // Convert container-percentage click to full-pitch 0-100% coordinates.
+  // When zoomed, 0-100% of container maps to just the drill rectangle.
   const getPositionFromEvent = useCallback((e: React.MouseEvent | MouseEvent): Position | null => {
     if (!containerRef.current) return null;
     
     const rect = containerRef.current.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    const rawX = ((e.clientX - rect.left) / rect.width) * 100;
+    const rawY = ((e.clientY - rect.top) / rect.height) * 100;
     
-    return {
-      x: Math.max(0, Math.min(100, x)),
-      y: Math.max(0, Math.min(100, y)),
-    };
-  }, []);
+    if (isZoomed && drillArea) {
+      // Map container percent → full-pitch percent within drill area
+      return {
+        x: Math.max(0, Math.min(100, drillArea.x + (rawX / 100) * drillArea.width)),
+        y: Math.max(0, Math.min(100, drillArea.y + (rawY / 100) * drillArea.height)),
+      };
+    }
 
+    return {
+      x: Math.max(0, Math.min(100, rawX)),
+      y: Math.max(0, Math.min(100, rawY)),
+    };
+  }, [isZoomed, drillArea]);
+
+  // Convert a full-pitch 0-100% position to display coordinates.
+  // When zoomed, we remap to the drill area's local space.
+  const toDisplayCoords = useCallback((pos: Position): Position => {
+    if (isZoomed && drillArea) {
+      return {
+        x: ((pos.x - drillArea.x) / drillArea.width) * 100,
+        y: ((pos.y - drillArea.y) / drillArea.height) * 100,
+      };
+    }
+    return pos;
+  }, [isZoomed, drillArea]);
+
+  // Compute SVG viewBox — zoom into drill area portion of the 105×68 pitch
+  const svgViewBox = isZoomed && drillArea
+    ? `${(drillArea.x / 100) * 105} ${(drillArea.y / 100) * 68} ${(drillArea.width / 100) * 105} ${(drillArea.height / 100) * 68}`
+    : '0 0 105 68';
+
+  const buildRect = (a: Position, b: Position): DrillRectangle => ({
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.abs(b.x - a.x),
+    height: Math.abs(b.y - a.y),
+  });
+
+  // ── Drill area resize: start drag on a corner handle ──
+  const handleResizeStart = useCallback((e: React.MouseEvent, handle: ResizeHandle) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!drillConfig.area) return;
+    const { x, y, width, height } = drillConfig.area;
+    // The anchor is the corner opposite to the one being dragged
+    const anchor: Record<ResizeHandle, Position> = {
+      nw: { x: x + width, y: y + height },
+      ne: { x, y: y + height },
+      sw: { x: x + width, y },
+      se: { x, y },
+    };
+    setResizingHandle(handle);
+    setResizeAnchor(anchor[handle]);
+  }, [drillConfig.area]);
+
+  // ── Mouse down on pitch ──
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const pos = getPositionFromEvent(e);
-    if (pos) {
-      setIsDragging(true);
-      setDragStart(pos);
-      setDragEnd(null);
-      // Reset any previous selection
-      setStartLocation(null);
-      setEndLocation(null);
-    }
-  }, [getPositionFromEvent, setStartLocation, setEndLocation]);
+    if (!pos) return;
 
+    if (isDrawingDrillArea) {
+      if (!drillCorner1) {
+        // First click: set corner 1
+        setDrillCorner1(pos);
+        setDrillPreviewPos(pos);
+      } else {
+        // Second click: finalise the rectangle
+        const rect = buildRect(drillCorner1, pos);
+        if (rect.width > 1 && rect.height > 1) {
+          setDrillArea(rect);
+        }
+        setDrillCorner1(null);
+        setDrillPreviewPos(null);
+        setIsDrawingDrillArea(false);
+      }
+      return;
+    }
+
+    // Normal event tagging drag
+    setIsDragging(true);
+    setDragStart(pos);
+    setDragEnd(null);
+    setStartLocation(null);
+    setEndLocation(null);
+  }, [getPositionFromEvent, setStartLocation, setEndLocation, isDrawingDrillArea, drillCorner1, setDrillArea, setIsDrawingDrillArea]);
+
+  // ── Mouse move (shared: event drag, drill preview, resize) ──
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (isDragging) {
+    if (resizingHandle && resizeAnchor) {
       const pos = getPositionFromEvent(e);
       if (pos) {
-        setDragEnd(pos);
+        const rect = buildRect(resizeAnchor, pos);
+        if (rect.width > 1 && rect.height > 1) {
+          setDrillArea(rect);
+        }
       }
+      return;
     }
-  }, [isDragging, getPositionFromEvent]);
+    if (isDrawingDrillArea && drillCorner1) {
+      const pos = getPositionFromEvent(e);
+      if (pos) setDrillPreviewPos(pos);
+      return;
+    }
+    if (isDragging) {
+      const pos = getPositionFromEvent(e);
+      if (pos) setDragEnd(pos);
+    }
+  }, [isDragging, isDrawingDrillArea, drillCorner1, resizingHandle, resizeAnchor, getPositionFromEvent, setDrillArea]);
 
+  // ── Mouse up ──
   const handleMouseUp = useCallback((e: MouseEvent) => {
+    if (resizingHandle) {
+      setResizingHandle(null);
+      setResizeAnchor(null);
+      return;
+    }
     if (isDragging && dragStart) {
       const endPos = getPositionFromEvent(e);
-      
-      // If drag distance is significant, it's a directional event
       if (endPos) {
         const distance = Math.sqrt(
           Math.pow(endPos.x - dragStart.x, 2) + Math.pow(endPos.y - dragStart.y, 2)
         );
-        
         setStartLocation(dragStart);
         if (distance > 3) {
-          // Threshold for considering it a drag
           setEndLocation(endPos);
         } else {
           setEndLocation(null);
         }
       }
-      
       setIsDragging(false);
       setDragStart(null);
       setDragEnd(null);
     }
-  }, [isDragging, dragStart, getPositionFromEvent, setStartLocation, setEndLocation]);
+  }, [isDragging, dragStart, resizingHandle, getPositionFromEvent, setStartLocation, setEndLocation]);
 
+  // Cancel drill drawing on Escape
   useEffect(() => {
-    if (isDragging) {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isDrawingDrillArea) {
+        setDrillCorner1(null);
+        setDrillPreviewPos(null);
+        setIsDrawingDrillArea(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isDrawingDrillArea, setIsDrawingDrillArea]);
+
+  // Global mouse move / up listeners
+  useEffect(() => {
+    const needsListeners = isDragging || (isDrawingDrillArea && drillCorner1) || resizingHandle;
+    if (needsListeners) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
       return () => {
@@ -87,14 +204,34 @@ export function SoccerPitch() {
         document.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isDragging, handleMouseMove, handleMouseUp]);
+  }, [isDragging, isDrawingDrillArea, drillCorner1, resizingHandle, handleMouseMove, handleMouseUp]);
+
+  // Preview rectangle while drawing
+  const drillPreviewRect = (drillCorner1 && drillPreviewPos) ? buildRect(drillCorner1, drillPreviewPos) : null;
+
+  // Compute corner positions for resize handles
+  const getHandlePositions = (area: DrillRectangle) => ({
+    nw: { x: area.x, y: area.y },
+    ne: { x: area.x + area.width, y: area.y },
+    sw: { x: area.x, y: area.y + area.height },
+    se: { x: area.x + area.width, y: area.y + area.height },
+  });
+
+  const handleCursors: Record<ResizeHandle, string> = {
+    nw: 'nwse-resize',
+    ne: 'nesw-resize',
+    sw: 'nesw-resize',
+    se: 'nwse-resize',
+  };
 
 
   return (
     <div className="glass-card p-3 rounded-xl h-full flex flex-col">
       <div
         ref={containerRef}
-        className="relative w-full flex-1 rounded-lg overflow-hidden cursor-crosshair select-none shadow-lg"
+        className={`relative w-full flex-1 rounded-lg overflow-hidden select-none shadow-lg ${
+          isDrawingDrillArea ? 'cursor-cell' : 'cursor-crosshair'
+        }`}
         onMouseDown={handleMouseDown}
         style={{
           background: '#2E8B57',
@@ -104,7 +241,7 @@ export function SoccerPitch() {
         {/* SVG Pitch Markings */}
         <svg
           className="absolute inset-0 w-full h-full"
-          viewBox="0 0 105 68"
+          viewBox={svgViewBox}
           preserveAspectRatio="none"
         >
           <defs>
@@ -184,121 +321,165 @@ export function SoccerPitch() {
         </svg>
 
         {/* Real-time drag preview */}
-        {isDragging && dragStart && dragEnd && (
-          <svg className="absolute inset-0 w-full h-full pointer-events-none">
-            <line
-              x1={`${dragStart.x}%`}
-              y1={`${dragStart.y}%`}
-              x2={`${dragEnd.x}%`}
-              y2={`${dragEnd.y}%`}
-              stroke="#FFD700"
-              strokeWidth="2"
-            />
-            <circle
-              cx={`${dragStart.x}%`}
-              cy={`${dragStart.y}%`}
-              r="6"
-              fill="#FFD700"
-            />
-            <circle
-              cx={`${dragEnd.x}%`}
-              cy={`${dragEnd.y}%`}
-              r="6"
-              fill="#FFD700"
-              opacity="0.7"
-            />
-          </svg>
-        )}
+        {isDragging && dragStart && dragEnd && (() => {
+          const ds = toDisplayCoords(dragStart);
+          const de = toDisplayCoords(dragEnd);
+          return (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none">
+              <line
+                x1={`${ds.x}%`} y1={`${ds.y}%`}
+                x2={`${de.x}%`} y2={`${de.y}%`}
+                stroke="#FFD700" strokeWidth="2"
+              />
+              <circle cx={`${ds.x}%`} cy={`${ds.y}%`} r="6" fill="#FFD700" />
+              <circle cx={`${de.x}%`} cy={`${de.y}%`} r="6" fill="#FFD700" opacity="0.7" />
+            </svg>
+          );
+        })()}
 
         {/* Selected location marker */}
-        {startLocation && !isDragging && (
-          <svg className="absolute inset-0 w-full h-full pointer-events-none">
-            {endLocation ? (
-              <>
-                <line
-                  x1={`${startLocation.x}%`}
-                  y1={`${startLocation.y}%`}
-                  x2={`${endLocation.x}%`}
-                  y2={`${endLocation.y}%`}
-                  stroke="#FFD700"
-                  strokeWidth="3"
-                />
+        {startLocation && !isDragging && (() => {
+          const sl = toDisplayCoords(startLocation);
+          const el = endLocation ? toDisplayCoords(endLocation) : null;
+          return (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none">
+              {el ? (
+                <>
+                  <line
+                    x1={`${sl.x}%`} y1={`${sl.y}%`}
+                    x2={`${el.x}%`} y2={`${el.y}%`}
+                    stroke="#FFD700" strokeWidth="3"
+                  />
+                  <circle cx={`${sl.x}%`} cy={`${sl.y}%`} r="8" fill="#FFD700" opacity="0.6" />
+                  <circle cx={`${el.x}%`} cy={`${el.y}%`} r="8" fill="#FFD700" stroke="#FFA500" strokeWidth="2" />
+                  <polygon
+                    points={`${el.x},${el.y - 1.5} ${el.x - 1},${el.y + 0.5} ${el.x + 1},${el.y + 0.5}`}
+                    fill="#FFD700"
+                    style={{
+                      transform: `rotate(${Math.atan2(el.y - sl.y, el.x - sl.x) * 180 / Math.PI + 90}deg)`,
+                      transformOrigin: `${el.x}% ${el.y}%`,
+                    }}
+                  />
+                </>
+              ) : (
+                <circle cx={`${sl.x}%`} cy={`${sl.y}%`} r="10" fill="#FFD700" opacity="0.6" />
+              )}
+            </svg>
+          );
+        })()}
+
+        {/* Highlighted event from log */}
+        {highlightedEvent && (() => {
+          const hs = toDisplayCoords(highlightedEvent.startLocation);
+          const he = highlightedEvent.endLocation ? toDisplayCoords(highlightedEvent.endLocation) : null;
+          return (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none">
+              {he ? (
+                <>
+                  <line
+                    x1={`${hs.x}%`} y1={`${hs.y}%`}
+                    x2={`${he.x}%`} y2={`${he.y}%`}
+                    stroke="#00BFFF" strokeWidth="3"
+                  />
+                  <circle cx={`${hs.x}%`} cy={`${hs.y}%`} r="8" fill="#00BFFF" />
+                  <circle cx={`${he.x}%`} cy={`${he.y}%`} r="8" fill="#00BFFF" stroke="#1E90FF" strokeWidth="2" />
+                </>
+              ) : (
+                <circle cx={`${hs.x}%`} cy={`${hs.y}%`} r="10" fill="#00BFFF" />
+              )}
+            </svg>
+          );
+        })()}
+
+        {/* Persisted drill area overlay with resize handles (only in full-field view) */}
+        {drillConfig.area && !isDrawingDrillArea && !isZoomed && (() => {
+          const area = drillConfig.area;
+          const handles = getHandlePositions(area);
+          return (
+            <svg className="absolute inset-0 w-full h-full" style={{ zIndex: 5 }}>
+              {/* Semi-transparent fill + dashed border (doesn't block clicks) */}
+              <rect
+                x={`${area.x}%`}
+                y={`${area.y}%`}
+                width={`${area.width}%`}
+                height={`${area.height}%`}
+                fill="rgba(255, 165, 0, 0.12)"
+                stroke="#FFA500"
+                strokeWidth="2"
+                strokeDasharray="6 3"
+                rx="2"
+                ry="2"
+                pointerEvents="none"
+              />
+              {/* Label */}
+              <text
+                x={`${area.x + area.width / 2}%`}
+                y={`${area.y + 3}%`}
+                textAnchor="middle"
+                fill="#FFA500"
+                fontSize="10"
+                fontWeight="bold"
+                opacity="0.9"
+                pointerEvents="none"
+              >
+                {drillConfig.drillType || 'Drill Area'}
+              </text>
+              {/* Resize corner handles */}
+              {(Object.entries(handles) as [ResizeHandle, Position][]).map(([key, pos]) => (
                 <circle
-                  cx={`${startLocation.x}%`}
-                  cy={`${startLocation.y}%`}
-                  r="8"
-                  fill="#FFD700"
-                  opacity="0.6"
-                />
-                <circle
-                  cx={`${endLocation.x}%`}
-                  cy={`${endLocation.y}%`}
-                  r="8"
-                  fill="#FFD700"
+                  key={key}
+                  cx={`${pos.x}%`}
+                  cy={`${pos.y}%`}
+                  r="6"
+                  fill="white"
                   stroke="#FFA500"
                   strokeWidth="2"
+                  style={{ cursor: handleCursors[key] }}
+                  onMouseDown={(e) => handleResizeStart(e, key)}
                 />
-                {/* Arrow head indicator */}
-                <polygon
-                  points={`${endLocation.x},${endLocation.y - 1.5} ${endLocation.x - 1},${endLocation.y + 0.5} ${endLocation.x + 1},${endLocation.y + 0.5}`}
-                  fill="#FFD700"
-                  style={{
-                    transform: `rotate(${Math.atan2(endLocation.y - startLocation.y, endLocation.x - startLocation.x) * 180 / Math.PI + 90}deg)`,
-                    transformOrigin: `${endLocation.x}% ${endLocation.y}%`,
-                  }}
-                />
-              </>
-            ) : (
-              <circle
-                cx={`${startLocation.x}%`}
-                cy={`${startLocation.y}%`}
-                r="10"
-                fill="#FFD700"
-                opacity="0.6"
-              />
+              ))}
+            </svg>
+          );
+        })()}
+
+        {/* Drill area drawing preview (two-click) — only in full-field view */}
+        {!isZoomed && drillPreviewRect && isDrawingDrillArea && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 10 }}>
+            <rect
+              x={`${drillPreviewRect.x}%`}
+              y={`${drillPreviewRect.y}%`}
+              width={`${drillPreviewRect.width}%`}
+              height={`${drillPreviewRect.height}%`}
+              fill="rgba(255, 165, 0, 0.2)"
+              stroke="#FFA500"
+              strokeWidth="2"
+              strokeDasharray="4 2"
+            />
+            {drillCorner1 && (
+              <circle cx={`${drillCorner1.x}%`} cy={`${drillCorner1.y}%`} r="5" fill="#FFA500" />
             )}
           </svg>
         )}
 
-        {/* Highlighted event from log */}
-        {highlightedEvent && (
-          <svg className="absolute inset-0 w-full h-full pointer-events-none">
-            {highlightedEvent.endLocation ? (
-              <>
-                <line
-                  x1={`${highlightedEvent.startLocation.x}%`}
-                  y1={`${highlightedEvent.startLocation.y}%`}
-                  x2={`${highlightedEvent.endLocation.x}%`}
-                  y2={`${highlightedEvent.endLocation.y}%`}
-                  stroke="#00BFFF"
-                  strokeWidth="3"
-                />
-                <circle
-                  cx={`${highlightedEvent.startLocation.x}%`}
-                  cy={`${highlightedEvent.startLocation.y}%`}
-                  r="8"
-                  fill="#00BFFF"
-                  className="animate-pulse-marker"
-                />
-                <circle
-                  cx={`${highlightedEvent.endLocation.x}%`}
-                  cy={`${highlightedEvent.endLocation.y}%`}
-                  r="8"
-                  fill="#00BFFF"
-                  stroke="#1E90FF"
-                  strokeWidth="2"
-                />
-              </>
-            ) : (
-              <circle
-                cx={`${highlightedEvent.startLocation.x}%`}
-                cy={`${highlightedEvent.startLocation.y}%`}
-                r="10"
-                fill="#00BFFF"
-                className="animate-pulse-marker"
-              />
-            )}
+        {/* First corner marker before mouse moves */}
+        {!isZoomed && drillCorner1 && !drillPreviewRect && isDrawingDrillArea && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 10 }}>
+            <circle cx={`${drillCorner1.x}%`} cy={`${drillCorner1.y}%`} r="5" fill="#FFA500" />
           </svg>
+        )}
+
+        {/* Drawing mode indicator */}
+        {isDrawingDrillArea && !isZoomed && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-xs font-bold px-3 py-1 rounded-full pointer-events-none z-20 animate-pulse">
+            {drillCorner1 ? 'Click to set second corner (Esc to cancel)' : 'Click to set first corner (Esc to cancel)'}
+          </div>
+        )}
+
+        {/* Zoomed drill mode indicator */}
+        {isZoomed && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-orange-600/90 text-white text-xs font-bold px-3 py-1 rounded-full pointer-events-none z-20">
+            {drillConfig.drillType || 'Drill'} — Zoomed
+          </div>
         )}
 
         

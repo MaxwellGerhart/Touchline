@@ -1,7 +1,7 @@
-import { MatchEvent } from '../types';
+import { MatchEvent, DrillConfig } from '../types';
 import { formatTimestamp, formatDate } from './formatters';
 
-export function exportToCSV(events: MatchEvent[]): void {
+export function exportToCSV(events: MatchEvent[], drillConfig?: DrillConfig): void {
   if (events.length === 0) {
     alert('No events to export');
     return;
@@ -19,6 +19,11 @@ export function exportToCSV(events: MatchEvent[]): void {
     'Start Y',
     'End X',
     'End Y',
+    'Normalized Start X',
+    'Normalized Start Y',
+    'Normalized End X',
+    'Normalized End Y',
+    'Drill Type',
     'Created At',
   ];
 
@@ -34,10 +39,26 @@ export function exportToCSV(events: MatchEvent[]): void {
     event.startLocation.y.toFixed(2),
     event.endLocation?.x.toFixed(2) ?? '',
     event.endLocation?.y.toFixed(2) ?? '',
+    event.normalizedStartLocation?.x.toFixed(2) ?? '',
+    event.normalizedStartLocation?.y.toFixed(2) ?? '',
+    event.normalizedEndLocation?.x.toFixed(2) ?? '',
+    event.normalizedEndLocation?.y.toFixed(2) ?? '',
+    event.drillType ?? '',
     event.createdAt,
   ]);
 
+  // Build metadata header rows for the drill config
+  const metaLines: string[] = [];
+  if (drillConfig && (drillConfig.drillType || drillConfig.area)) {
+    metaLines.push(`"# Drill Type","${drillConfig.drillType || ''}"`);
+    if (drillConfig.area) {
+      metaLines.push(`"# Drill Area X","${drillConfig.area.x.toFixed(2)}","# Drill Area Y","${drillConfig.area.y.toFixed(2)}","# Drill Area Width","${drillConfig.area.width.toFixed(2)}","# Drill Area Height","${drillConfig.area.height.toFixed(2)}"`);
+    }
+    metaLines.push(''); // blank line separator
+  }
+
   const csvContent = [
+    ...metaLines,
     headers.join(','),
     ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
   ].join('\n');

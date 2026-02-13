@@ -3,6 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import { EventProvider } from './context/EventContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { LayoutProvider } from './context/LayoutContext';
+import { DrillProvider } from './context/DrillContext';
 import { useLayout } from './context/LayoutContext';
 import { TaggingPage } from './components/TaggingPage';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -83,7 +84,9 @@ function App() {
     <ThemeProvider>
       <LayoutProvider>
         <EventProvider>
-          <AppContent />
+          <DrillProvider>
+            <AppContent />
+          </DrillProvider>
         </EventProvider>
       </LayoutProvider>
     </ThemeProvider>

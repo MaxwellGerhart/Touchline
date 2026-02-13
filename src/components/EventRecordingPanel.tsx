@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { Plus, X, Edit2, Check, Eye, UserPlus } from 'lucide-react';
+import { Plus, X, Edit2, Check, Eye, UserPlus, Target, Trash2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
-import { TeamId, Player, RosterPlayer } from '../types';
+import { useDrill } from '../context/DrillContext';
+import { TeamId, Player, RosterPlayer, normalizePosition } from '../types';
 
 export function EventRecordingPanel() {
   const {
     selectedPlayer,
     selectedTeam,
     setSelectedPlayer,
+    playupReceiver,
+    playupReceiverTeam,
+    setPlayupReceiver,
     selectedEventType,
     setSelectedEventType,
     startLocation,
@@ -15,6 +19,7 @@ export function EventRecordingPanel() {
     currentVideoTime,
     players,
     addEvent,
+    addPlayupEvent,
     resetSelection,
     setHighlightedEventId,
     eventTypes,
@@ -29,6 +34,8 @@ export function EventRecordingPanel() {
     activeRoster,
     addRosterPlayerToTeam,
   } = useEvents();
+
+  const { drillConfig, setDrillType, setDrillArea, clearDrill, isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive, setIsDrillActive } = useDrill();
 
   const [newEventType, setNewEventType] = useState('');
   const [showAddInput, setShowAddInput] = useState(false);
@@ -117,23 +124,44 @@ export function EventRecordingPanel() {
     }
   };
 
-  const canRecord = selectedPlayer !== null && selectedTeam !== null && selectedEventType !== null && startLocation !== null;
+  const isPlayup = selectedEventType === 'Playup';
+
+  const canRecord = isPlayup
+    ? selectedPlayer !== null && selectedTeam !== null && playupReceiver !== null && playupReceiverTeam !== null && startLocation !== null && endLocation !== null
+    : selectedPlayer !== null && selectedTeam !== null && selectedEventType !== null && startLocation !== null;
 
   const handleRecordEvent = () => {
-    if (!canRecord || selectedPlayer === null || selectedTeam === null || selectedEventType === null || startLocation === null) return;
+    if (!canRecord) return;
 
-    const player = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
-    if (!player) return;
+    if (isPlayup) {
+      if (selectedPlayer === null || selectedTeam === null || playupReceiver === null || playupReceiverTeam === null || startLocation === null || endLocation === null) return;
+      const passer = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
+      const receiver = players.find(p => p.id === playupReceiver && p.team === playupReceiverTeam);
+      if (!passer || !receiver) return;
+      addPlayupEvent(passer, receiver, startLocation, endLocation, currentVideoTime);
+    } else {
+      if (selectedPlayer === null || selectedTeam === null || selectedEventType === null || startLocation === null) return;
+      const player = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
+      if (!player) return;
 
-    addEvent({
-      videoTimestamp: currentVideoTime,
-      playerId: selectedPlayer,
-      playerName: player.name,
-      playerTeam: selectedTeam,
-      eventType: selectedEventType,
-      startLocation,
-      endLocation: endLocation || undefined,
-    });
+      // Compute normalized (game-equivalent) coordinates if drill area is defined
+      const drillArea = drillConfig.area;
+      const normalizedStart = drillArea ? normalizePosition(startLocation, drillArea) : undefined;
+      const normalizedEnd = endLocation && drillArea ? normalizePosition(endLocation, drillArea) : undefined;
+
+      addEvent({
+        videoTimestamp: currentVideoTime,
+        playerId: selectedPlayer,
+        playerName: player.name,
+        playerTeam: selectedTeam,
+        eventType: selectedEventType,
+        startLocation,
+        endLocation: endLocation || undefined,
+        normalizedStartLocation: normalizedStart,
+        normalizedEndLocation: normalizedEnd,
+        drillType: drillConfig.drillType || undefined,
+      });
+    }
 
     setHighlightedEventId(null);
     resetSelection();
@@ -156,13 +184,62 @@ export function EventRecordingPanel() {
     }
   };
 
+  // Playup-aware player click handler
+  const handlePlayerClick = (playerId: number, team: TeamId) => {
+    if (isPlayup) {
+      // If no passer selected yet, or clicking from a different team when passer is set
+      if (selectedPlayer === null || selectedTeam === null) {
+        setSelectedPlayer(playerId, team);
+        // Clear receiver if it was set
+        setPlayupReceiver(null);
+      } else if (selectedPlayer === playerId && selectedTeam === team) {
+        // Clicking the passer again deselects
+        setSelectedPlayer(null);
+        setPlayupReceiver(null);
+      } else if (team !== selectedTeam) {
+        // Different team - switch passer to this player
+        setSelectedPlayer(playerId, team);
+        setPlayupReceiver(null);
+      } else {
+        // Same team, different player - set as receiver
+        if (playupReceiver === playerId && playupReceiverTeam === team) {
+          // Deselect receiver
+          setPlayupReceiver(null);
+        } else {
+          setPlayupReceiver(playerId, team);
+        }
+      }
+    } else {
+      // Normal: toggle selection
+      setSelectedPlayer(
+        selectedPlayer === playerId && selectedTeam === team ? null : playerId,
+        selectedPlayer === playerId && selectedTeam === team ? null : team
+      );
+    }
+  };
+
+  const getPlayerButtonStyle = (playerId: number, team: TeamId) => {
+    const isPasser = selectedPlayer === playerId && selectedTeam === team;
+    const isReceiver = playupReceiver === playerId && playupReceiverTeam === team;
+    if (isPlayup && isPasser) {
+      return 'bg-navy dark:bg-rose text-white ring-1 ring-navy dark:ring-rose';
+    }
+    if (isPlayup && isReceiver) {
+      return 'bg-emerald-500 dark:bg-emerald-600 text-white ring-1 ring-emerald-500 dark:ring-emerald-600';
+    }
+    if (!isPlayup && isPasser) {
+      return 'bg-navy dark:bg-rose text-white ring-1 ring-navy dark:ring-rose';
+    }
+    return 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700';
+  };
+
   return (
     <div className="glass-card p-3 rounded-xl h-full flex flex-col gap-2 overflow-auto">
       {/* Player Selection */}
       <div>
         <div className="flex items-center justify-between mb-1">
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-            Player
+            {isPlayup ? 'Passer & Receiver (same team)' : 'Player'}
           </label>
           <button
             onClick={cyclePlayerDisplayMode}
@@ -208,18 +285,12 @@ export function EventRecordingPanel() {
             {team1Players.map((player) => (
               <div key={`team1-${player.id}`} className="relative group">
                 <button
-                  onClick={() => setSelectedPlayer(
-                    selectedPlayer === player.id && selectedTeam === 1 ? null : player.id,
-                    selectedPlayer === player.id && selectedTeam === 1 ? null : 1
-                  )}
+                  onClick={() => handlePlayerClick(player.id, 1)}
                   className={`
                     p-1.5 rounded text-center transition-all duration-200 text-sm font-bold
-                    ${selectedPlayer === player.id && selectedTeam === 1
-                      ? 'bg-navy dark:bg-rose text-white ring-1 ring-navy dark:ring-rose'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                    }
+                    ${getPlayerButtonStyle(player.id, 1)}
                   `}
-                  title={player.name}
+                  title={`${player.name}${isPlayup && selectedPlayer === player.id && selectedTeam === 1 ? ' (Passer)' : ''}${isPlayup && playupReceiver === player.id && playupReceiverTeam === 1 ? ' (Receiver)' : ''}`}
                 >
                   {getPlayerLabel(player)}
                 </button>
@@ -357,18 +428,12 @@ export function EventRecordingPanel() {
             {team2Players.map((player) => (
               <div key={`team2-${player.id}`} className="relative group">
                 <button
-                  onClick={() => setSelectedPlayer(
-                    selectedPlayer === player.id && selectedTeam === 2 ? null : player.id,
-                    selectedPlayer === player.id && selectedTeam === 2 ? null : 2
-                  )}
+                  onClick={() => handlePlayerClick(player.id, 2)}
                   className={`
                     p-1.5 rounded text-center transition-all duration-200 text-sm font-bold
-                    ${selectedPlayer === player.id && selectedTeam === 2
-                      ? 'bg-navy dark:bg-rose text-white ring-1 ring-navy dark:ring-rose'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                    }
+                    ${getPlayerButtonStyle(player.id, 2)}
                   `}
-                  title={player.name}
+                  title={`${player.name}${isPlayup && selectedPlayer === player.id && selectedTeam === 2 ? ' (Passer)' : ''}${isPlayup && playupReceiver === player.id && playupReceiverTeam === 2 ? ' (Receiver)' : ''}`}
                 >
                   {getPlayerLabel(player)}
                 </button>
@@ -539,13 +604,90 @@ export function EventRecordingPanel() {
         </div>
       </div>
 
+      {/* Drill Setup */}
+      <div>
+        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+          <Target className="w-3 h-3 inline mr-1" />
+          Drill Setup
+        </label>
+        <div className="flex flex-col gap-1.5">
+          <input
+            type="text"
+            value={drillConfig.drillType}
+            onChange={(e) => setDrillType(e.target.value)}
+            placeholder="Drill type (e.g. Half-field 6v6)"
+            className="px-2 py-1 rounded text-xs w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-orange-400 dark:focus:ring-orange-500"
+          />
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setIsDrawingDrillArea(!isDrawingDrillArea)}
+              className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
+                isDrawingDrillArea
+                  ? 'bg-orange-500 text-white ring-1 ring-orange-500'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+              }`}
+              title={isDrawingDrillArea ? 'Cancel drawing' : 'Draw drill area on pitch'}
+            >
+              <Target className="w-3 h-3" />
+              {isDrawingDrillArea ? 'Drawing...' : 'Draw Area'}
+            </button>
+            {drillConfig.area && (
+              <>
+                <button
+                  onClick={() => setIsDrillActive(!isDrillActive)}
+                  className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
+                    isDrillActive
+                      ? 'bg-green-600 text-white ring-1 ring-green-600'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                  title={isDrillActive ? 'Deactivate drill (return to full field)' : 'Activate drill (zoom into area)'}
+                >
+                  {isDrillActive ? <ZoomOut className="w-3 h-3" /> : <ZoomIn className="w-3 h-3" />}
+                  {isDrillActive ? 'Active' : 'Activate'}
+                </button>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                  {drillConfig.area.width.toFixed(0)}% x {drillConfig.area.height.toFixed(0)}%
+                </span>
+                <button
+                  onClick={() => setDrillArea(null)}
+                  className="p-1 rounded text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30"
+                  title="Remove drill area"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </>
+            )}
+            {(drillConfig.drillType || drillConfig.area) && (
+              <button
+                onClick={clearDrill}
+                className="p-1 rounded text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 ml-auto"
+                title="Clear all drill setup"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Status and Record Button */}
       <div className="flex-1 flex items-end justify-end">
         <div className="flex items-center gap-2">
           <div className="text-xs text-gray-500 dark:text-gray-400 mr-4">
-            {selectedPlayer && <span className="text-green-600 dark:text-green-400">#{selectedPlayer}</span>}
-            {selectedEventType && <span className="text-green-600 dark:text-green-400 ml-2">{selectedEventType}</span>}
-            {startLocation && <span className="text-green-600 dark:text-green-400 ml-2">Location set</span>}
+            {isPlayup ? (
+              <>
+                {selectedPlayer && <span className="text-green-600 dark:text-green-400">Passer: #{selectedPlayer}</span>}
+                {playupReceiver && <span className="text-emerald-600 dark:text-emerald-400 ml-2">Receiver: #{playupReceiver}</span>}
+                {startLocation && endLocation && <span className="text-green-600 dark:text-green-400 ml-2">Locations set</span>}
+                {startLocation && !endLocation && <span className="text-yellow-600 dark:text-yellow-400 ml-2">Drag for end location</span>}
+              </>
+            ) : (
+              <>
+                {selectedPlayer && <span className="text-green-600 dark:text-green-400">#{selectedPlayer}</span>}
+                {selectedEventType && <span className="text-green-600 dark:text-green-400 ml-2">{selectedEventType}</span>}
+                {startLocation && <span className="text-green-600 dark:text-green-400 ml-2">Location set</span>}
+              </>
+            )}
           </div>
           <button
             onClick={handleRecordEvent}

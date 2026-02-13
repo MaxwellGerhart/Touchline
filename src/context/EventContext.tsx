@@ -5,11 +5,15 @@ import { MatchEvent, EventType, Position, DEFAULT_PLAYERS, Player, DEFAULT_EVENT
 interface EventContextType {
   events: MatchEvent[];
   addEvent: (event: Omit<MatchEvent, 'id' | 'createdAt'>) => void;
+  addPlayupEvent: (passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number) => void;
   deleteEvent: (id: string) => void;
   clearEvents: () => void;
   selectedPlayer: number | null;
   selectedTeam: TeamId | null;
   setSelectedPlayer: (id: number | null, team?: TeamId | null) => void;
+  playupReceiver: number | null;
+  playupReceiverTeam: TeamId | null;
+  setPlayupReceiver: (id: number | null, team?: TeamId | null) => void;
   selectedEventType: EventType | null;
   setSelectedEventType: (type: EventType | null) => void;
   startLocation: Position | null;
@@ -97,11 +101,18 @@ export function EventProvider({ children }: { children: ReactNode }) {
 
   const [selectedPlayer, setSelectedPlayerState] = useState<number | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<TeamId | null>(null);
+  const [playupReceiverState, setPlayupReceiverState] = useState<number | null>(null);
+  const [playupReceiverTeamState, setPlayupReceiverTeamState] = useState<TeamId | null>(null);
   const [selectedEventType, setSelectedEventType] = useState<EventType | null>(null);
 
   const setSelectedPlayer = useCallback((id: number | null, team?: TeamId | null) => {
     setSelectedPlayerState(id);
     setSelectedTeam(team ?? null);
+  }, []);
+
+  const setPlayupReceiver = useCallback((id: number | null, team?: TeamId | null) => {
+    setPlayupReceiverState(id);
+    setPlayupReceiverTeamState(team ?? null);
   }, []);
 
   const addPlayer = useCallback((id: number, team: TeamId, name?: string) => {
@@ -225,6 +236,33 @@ export function EventProvider({ children }: { children: ReactNode }) {
     setEvents(prev => [...prev, newEvent].sort((a, b) => a.videoTimestamp - b.videoTimestamp));
   }, []);
 
+  const addPlayupEvent = useCallback((passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number) => {
+    const now = new Date().toISOString();
+    const passEvent: MatchEvent = {
+      id: uuidv4(),
+      videoTimestamp: videoTime,
+      playerId: passer.id,
+      playerName: passer.name,
+      playerTeam: passer.team,
+      eventType: 'Playup',
+      startLocation: startLoc,
+      endLocation: endLoc,
+      createdAt: now,
+    };
+    const receiveEvent: MatchEvent = {
+      id: uuidv4(),
+      videoTimestamp: videoTime,
+      playerId: receiver.id,
+      playerName: receiver.name,
+      playerTeam: receiver.team,
+      eventType: 'Playup Received',
+      startLocation: startLoc,
+      endLocation: endLoc,
+      createdAt: now,
+    };
+    setEvents(prev => [...prev, passEvent, receiveEvent].sort((a, b) => a.videoTimestamp - b.videoTimestamp));
+  }, []);
+
   const deleteEvent = useCallback((id: string) => {
     setEvents(prev => prev.filter(e => e.id !== id));
     if (highlightedEventId === id) {
@@ -274,6 +312,8 @@ export function EventProvider({ children }: { children: ReactNode }) {
   const resetSelection = useCallback(() => {
     setSelectedPlayerState(null);
     setSelectedTeam(null);
+    setPlayupReceiverState(null);
+    setPlayupReceiverTeamState(null);
     setSelectedEventType(null);
     setStartLocation(null);
     setEndLocation(null);
@@ -284,11 +324,15 @@ export function EventProvider({ children }: { children: ReactNode }) {
       value={{
         events,
         addEvent,
+        addPlayupEvent,
         deleteEvent,
         clearEvents,
         selectedPlayer,
         selectedTeam,
         setSelectedPlayer,
+        playupReceiver: playupReceiverState,
+        playupReceiverTeam: playupReceiverTeamState,
+        setPlayupReceiver,
         selectedEventType,
         setSelectedEventType,
         startLocation,

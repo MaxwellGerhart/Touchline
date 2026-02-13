@@ -17,6 +17,9 @@ export interface MatchEvent {
   eventType: EventType;
   startLocation: Position;
   endLocation?: Position; // Optional for directional events
+  normalizedStartLocation?: Position; // Game-equivalent coordinates (mapped from drill area)
+  normalizedEndLocation?: Position;   // Game-equivalent coordinates (mapped from drill area)
+  drillType?: string;                 // Drill type when event was recorded
   createdAt: string; // ISO timestamp
 }
 
@@ -63,19 +66,50 @@ export const DEFAULT_EVENT_TYPES: string[] = [
   'Foul',
   'Save',
   'Goal',
+  'Playup',
 ];
 
-// Roster management
-export interface RosterPlayer {
-  id: string; // unique id within roster
-  number: number;
-  name: string;
-}
+  // Roster management
+  export interface RosterPlayer {
+    number: number;
+    name: string;
+  }
 
 export interface Roster {
   id: string;
   name: string;
   players: RosterPlayer[];
   createdAt: string;
+}
+
+// Drill area types
+export interface DrillRectangle {
+  x: number;      // 0-100 percentage, top-left X on pitch
+  y: number;      // 0-100 percentage, top-left Y on pitch
+  width: number;  // 0-100 percentage
+  height: number; // 0-100 percentage
+}
+
+export interface DrillConfig {
+  drillType: string;
+  area: DrillRectangle | null;
+}
+
+export const DEFAULT_DRILL_CONFIG: DrillConfig = {
+  drillType: '',
+  area: null,
+};
+
+/**
+ * Normalize a raw pitch position (0-100) into canonical full-pitch coordinates
+ * based on the drill rectangle. This maps the drill area onto the full pitch.
+ */
+export function normalizePosition(raw: Position, drillArea: DrillRectangle): Position {
+  const relX = (raw.x - drillArea.x) / drillArea.width;
+  const relY = (raw.y - drillArea.y) / drillArea.height;
+  return {
+    x: Math.max(0, Math.min(100, relX * 100)),
+    y: Math.max(0, Math.min(100, relY * 100)),
+  };
 }
 

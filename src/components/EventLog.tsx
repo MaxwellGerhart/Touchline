@@ -1,6 +1,7 @@
 
 import { Trash2, Download, FileSpreadsheet } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
+import { useDrill } from '../context/DrillContext';
 import { formatTimestamp } from '../utils/formatters';
 import { exportToCSV } from '../utils/export';
 
@@ -14,13 +15,15 @@ export function EventLog() {
     teamNames,
   } = useEvents();
 
+  const { drillConfig } = useDrill();
+
   const handleEventClick = (eventId: string) => {
     resetSelection();
     setHighlightedEventId(highlightedEventId === eventId ? null : eventId);
   };
 
   const handleExportCSV = () => {
-    exportToCSV(events);
+    exportToCSV(events, drillConfig);
   };
 
   const getEventTypeColor = (type: string): string => {
@@ -35,6 +38,8 @@ export function EventLog() {
       Foul: 'bg-red-500',
       Save: 'bg-teal-500',
       Goal: 'bg-emerald-500',
+      Playup: 'bg-indigo-500',
+      'Playup Received': 'bg-indigo-400',
     };
     return colors[type] || 'bg-gray-500';
   };
