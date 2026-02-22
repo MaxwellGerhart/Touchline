@@ -117,17 +117,6 @@ function line(
   ctx.stroke();
 }
 
-function dashedLine(
-  ctx: CanvasRenderingContext2D,
-  x0: number, y0: number, x1: number, y1: number,
-  color: string, lw: number, dash: number[] = [6, 4],
-) {
-  ctx.save();
-  ctx.setLineDash(dash);
-  line(ctx, x0, y0, x1, y1, color, lw);
-  ctx.restore();
-}
-
 function strokeRect(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
