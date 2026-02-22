@@ -535,10 +535,10 @@ export function renderPlayupMap(
   plainText(ctx, 'Receiver', lx + 20, legendY - 8, fc, 24);
 
   // Direction arrow at right edge
-  const dirX0 = W * 0.82;
-  const dirX1 = W * 0.93;
-  drawArrow(ctx, dirX0, legendY + 6, dirX1, legendY + 6, SHOT_GREY, 2.4, 14);
-  plainText(ctx, 'Attack', dirX0, legendY + 22, SHOT_GREY, 20, { align: 'left' });
+  const dirX0 = W * 0.88;
+  const dirX1 = W * 0.90;
+  drawArrow(ctx, dirX0 - 40, legendY + 6, dirX1, legendY + 6, SHOT_GREY, 2.4, 14);
+  plainText(ctx, 'Attack', dirX0, legendY + 22, SHOT_GREY, 20, { align: 'center' });
 
   // ── Pitch (horizontal, matching shot-map colours) ─────────────────────
   const pitchAspect = PL / PW; // ≈ 1.544
