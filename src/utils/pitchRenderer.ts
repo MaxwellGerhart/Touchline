@@ -41,6 +41,12 @@ export interface ShotMapOptions {
   sizeBy: 'xg' | 'distance';
 }
 
+export interface HeatmapOptions {
+  teamName: string;
+  subtitle: string;
+  teamColor: string;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  Constants
 // ═══════════════════════════════════════════════════════════════════════════
@@ -281,6 +287,22 @@ function drawFullPitch(
   lineColor: string,
 ) {
   const lw = Math.max(1, r.w / 900);
+  const arcR = (CIRCLE_R / PL) * r.w;
+
+  const m = (mX: number, mY: number) => meterFull(mX, mY, r);
+  const sr = (x0: number, y0: number, x1: number, y1: number) =>
+    strokeRect(ctx, x0, y0, x1 - x0, y1 - y0, lineColor, lw);
+  const ln = (x0: number, y0: number, x1: number, y1: number) =>
+    line(ctx, x0, y0, x1, y1, lineColor, lw);
+  const fc = (x: number, y: number) =>
+    filledCircle(ctx, x, y, 2, lineColor);
+  const penArc = (cx: number, cy: number, start: number, end: number, acw: boolean) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, arcR, start, end, acw);
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+  };
 
   // Surface
   ctx.fillStyle = pitchColor;
@@ -289,60 +311,45 @@ function drawFullPitch(
   // Boundary
   strokeRect(ctx, r.x, r.y, r.w, r.h, lineColor, lw);
 
-  // Halfway
-  const [hx0, hy0] = meterFull(PL / 2, 0, r);
-  const [, hy1] = meterFull(PL / 2, PW, r);
-  line(ctx, hx0, hy0, hx0, hy1, lineColor, lw);
+  // Halfway line
+  const [hx, hy0] = m(PL / 2, 0);
+  const [,   hy1] = m(PL / 2, PW);
+  ln(hx, hy0, hx, hy1);
 
   // Centre circle & spot
-  const [ccx, ccy] = meterFull(PL / 2, PW / 2, r);
-  const ccr = (CIRCLE_R / PL) * r.w;
-  circle(ctx, ccx, ccy, ccr, lineColor, lw);
-  filledCircle(ctx, ccx, ccy, 2, lineColor);
+  const [ccx, ccy] = m(PL / 2, PW / 2);
+  circle(ctx, ccx, ccy, arcR, lineColor, lw);
+  fc(ccx, ccy);
 
-  // Penalty areas (both ends)
-  for (const xBase of [0, PL]) {
-    const isLeft = xBase === 0;
+  for (const isLeft of [true, false]) {
+    // Penalty area box
+    const [pax0, pay0] = m(isLeft ? 0        : PL - PA_DEPTH, PA_Y0);
+    const [pax1, pay1] = m(isLeft ? PA_DEPTH : PL,            PA_Y1);
+    sr(pax0, pay0, pax1, pay1);
 
-    // Penalty area rect
-    const [pax0] = meterFull(isLeft ? 0 : PL - PA_DEPTH, PA_Y0, r);
-    const [pax1, pay1] = meterFull(isLeft ? PA_DEPTH : PL, PA_Y1, r);
-    const [, pay0] = meterFull(0, PA_Y0, r);
-    strokeRect(ctx, pax0, pay0, pax1 - pax0, pay1 - pay0, lineColor, lw);
-
-    // Goal area rect
-    const [gax0] = meterFull(isLeft ? 0 : PL - GA_DEPTH, GA_Y0, r);
-    const [gax1, gay1] = meterFull(isLeft ? GA_DEPTH : PL, GA_Y1, r);
-    const [, gay0] = meterFull(0, GA_Y0, r);
-    strokeRect(ctx, gax0, gay0, gax1 - gax0, gay1 - gay0, lineColor, lw);
+    // Goal area box
+    const [gax0, gay0] = m(isLeft ? 0        : PL - GA_DEPTH, GA_Y0);
+    const [gax1, gay1] = m(isLeft ? GA_DEPTH : PL,            GA_Y1);
+    sr(gax0, gay0, gax1, gay1);
 
     // Penalty spot
-    const penX = isLeft ? PEN_DIST : PL - PEN_DIST;
-    const [psx, psy] = meterFull(penX, PW / 2, r);
-    filledCircle(ctx, psx, psy, 2, lineColor);
+    const [psx, psy] = m(isLeft ? PEN_DIST : PL - PEN_DIST, PW / 2);
+    fc(psx, psy);
 
-    // Penalty arc (D outside the penalty area)
-    const [pcx, pcy] = meterFull(penX, PW / 2, r);
-    const arcR = (CIRCLE_R / PL) * r.w;
-    const paEdgeX = isLeft ? PA_DEPTH : PL - PA_DEPTH;
-    const [paEdgePx] = meterFull(paEdgeX, 0, r);
+    // Penalty arc.
+    // The circle centred on the spot crosses the PA edge line at ±halfAngle
+    // from the horizontal. We then pick the arc that sweeps outward —
+    // through π (left) or through 0/2π (right) — using anticlockwise=true
+    // to select the correct sector without any midAngle arithmetic.
+    const [paEdgePx] = m(isLeft ? PA_DEPTH : PL - PA_DEPTH, 0);
+    const ratio = (paEdgePx - psx) / arcR;
+    const halfAngle = Math.acos(Math.max(-1, Math.min(1, ratio)));
 
-    ctx.beginPath();
-    const steps = 200;
-    let started = false;
-    for (let i = 0; i <= steps; i++) {
-      const t = (i / steps) * Math.PI * 2;
-      const ax = pcx + arcR * Math.cos(t);
-      const ay = pcy + arcR * Math.sin(t);
-      const outside = isLeft ? ax > paEdgePx : ax < paEdgePx;
-      if (outside) {
-        if (!started) { ctx.moveTo(ax, ay); started = true; }
-        else ctx.lineTo(ax, ay);
-      }
+    if (isLeft) {
+      penArc(psx, psy,  halfAngle, -halfAngle, true);  // sweeps through π
+    } else {
+      penArc(psx, psy, -halfAngle,  halfAngle, true);  // sweeps through 0
     }
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = lw;
-    ctx.stroke();
   }
 }
 
@@ -357,72 +364,67 @@ function drawHalfPitch(
   lineColor: string,
 ) {
   const lw = Math.max(1, r.w / 600);
+  const arcRx = CIRCLE_R * (r.w / PW);
+  const arcRy = CIRCLE_R * (r.h / (PL / 2));
+
+  const m = (mX: number, mY: number) => meterHalf(mX, mY, r);
+  const sr = (x0: number, y0: number, x1: number, y1: number) =>
+    strokeRect(ctx, x0, y0, x1 - x0, y1 - y0, lineColor, lw);
+  const fc = (x: number, y: number) =>
+    filledCircle(ctx, x, y, 2.5, lineColor);
+
+  // Draws the portion of an ellipse on one side of a horizontal clip line.
+  // keepBelow=true → keep the arc where canvas-Y > clipY (lower on screen).
+  // keepBelow=false → keep the arc where canvas-Y < clipY (higher on screen).
+  const ellipseArc = (
+    cx: number, cy: number,
+    rx: number, ry: number,
+    clipY: number,
+    keepBelow: boolean,
+  ) => {
+    const sinT = Math.max(-1, Math.min(1, (clipY - cy) / ry));
+    const tCross = Math.asin(sinT); // angle where ellipse crosses clipY, in [-π/2, π/2]
+    // Ellipse crosses clipY at two angles: tCross and π - tCross.
+    // Bottom arc (larger Y) runs from tCross → π - tCross (clockwise, anticlockwise=false).
+    // Top arc (smaller Y) runs from π - tCross → tCross + 2π (clockwise).
+    const [startAngle, endAngle] = keepBelow
+      ? [tCross,          Math.PI - tCross]
+      : [Math.PI - tCross, tCross + Math.PI * 2];
+
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, startAngle, endAngle, false);
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+  };
 
   // Surface
   ctx.fillStyle = pitchColor;
   ctx.fillRect(r.x, r.y, r.w, r.h);
 
-  // Boundary (goal line at top, halfway at bottom, sidelines)
+  // Boundary
   strokeRect(ctx, r.x, r.y, r.w, r.h, lineColor, lw);
 
   // Penalty area
-  const [paTL_x, paTL_y] = meterHalf(PL, PA_Y0, r);
-  const [paBR_x, paBR_y] = meterHalf(PL - PA_DEPTH, PA_Y1, r);
-  strokeRect(ctx, paTL_x, paTL_y, paBR_x - paTL_x, paBR_y - paTL_y, lineColor, lw);
+  const [pax0, pay0] = m(PL,            PA_Y0);
+  const [pax1, pay1] = m(PL - PA_DEPTH, PA_Y1);
+  sr(pax0, pay0, pax1, pay1);
 
   // Goal area
-  const [gaTL_x, gaTL_y] = meterHalf(PL, GA_Y0, r);
-  const [gaBR_x, gaBR_y] = meterHalf(PL - GA_DEPTH, GA_Y1, r);
-  strokeRect(ctx, gaTL_x, gaTL_y, gaBR_x - gaTL_x, gaBR_y - gaTL_y, lineColor, lw);
+  const [gax0, gay0] = m(PL,            GA_Y0);
+  const [gax1, gay1] = m(PL - GA_DEPTH, GA_Y1);
+  sr(gax0, gay0, gax1, gay1);
 
-  // Penalty spot
-  const [psx, psy] = meterHalf(PL - PEN_DIST, PW / 2, r);
-  filledCircle(ctx, psx, psy, 2.5, lineColor);
+  // Penalty spot & arc (arc bulges downward, away from goal)
+  const [psx, psy] = m(PL - PEN_DIST, PW / 2);
+  fc(psx, psy);
+  const [, paEdgeY] = m(PL - PA_DEPTH, 0);
+  ellipseArc(psx, psy, arcRx, arcRy, paEdgeY, true);
 
-  // Penalty arc (outside penalty area)
-  const [pcx, pcy] = meterHalf(PL - PEN_DIST, PW / 2, r);
-  const arcRx = (CIRCLE_R / PW) * r.w;
-  const arcRy = (CIRCLE_R / (PL / 2)) * r.h;
-  const [, paEdgeY] = meterHalf(PL - PA_DEPTH, 0, r);
-
-  ctx.beginPath();
-  const steps = 200;
-  let started = false;
-  for (let i = 0; i <= steps; i++) {
-    const t = (i / steps) * Math.PI * 2;
-    const ax = pcx + arcRx * Math.cos(t);
-    const ay = pcy + arcRy * Math.sin(t);
-    if (ay > paEdgeY) {
-      if (!started) { ctx.moveTo(ax, ay); started = true; }
-      else ctx.lineTo(ax, ay);
-    }
-  }
-  ctx.strokeStyle = lineColor;
-  ctx.lineWidth = lw;
-  ctx.stroke();
-
-  // Centre circle arc (only portion in attacking half)
-  const [cx2, cy2] = meterHalf(PL / 2, PW / 2, r);
-  const crx = (CIRCLE_R / PW) * r.w;
-  const cry = (CIRCLE_R / (PL / 2)) * r.h;
-
-  ctx.beginPath();
-  started = false;
-  for (let i = 0; i <= steps; i++) {
-    const t = (i / steps) * Math.PI * 2;
-    const ax = cx2 + crx * Math.cos(t);
-    const ay = cy2 + cry * Math.sin(t);
-    if (ay < r.y + r.h) { // above halfway line
-      if (!started) { ctx.moveTo(ax, ay); started = true; }
-      else ctx.lineTo(ax, ay);
-    }
-  }
-  ctx.strokeStyle = lineColor;
-  ctx.lineWidth = lw;
-  ctx.stroke();
-
-  // Centre spot
-  filledCircle(ctx, cx2, cy2, 2.5, lineColor);
+  // Centre spot & circle arc (keep only the top half, inside attacking half)
+  const [ccx, ccy] = m(PL / 2, PW / 2);
+  fc(ccx, ccy);
+  ellipseArc(ccx, ccy, arcRx, arcRy, r.y + r.h, false);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -442,8 +444,6 @@ export function renderPlayupMap(
   const H = PLAYUP_CANVAS_H;
   canvas.width = W * dpr;
   canvas.height = H * dpr;
-  canvas.style.width = `${W}px`;
-  canvas.style.height = `${H}px`;
 
   const ctx = canvas.getContext('2d')!;
   ctx.scale(dpr, dpr);
@@ -787,8 +787,6 @@ export function renderShotMap(
   const H = SHOT_CANVAS_H;
   canvas.width = W * dpr;
   canvas.height = H * dpr;
-  canvas.style.width = `${W}px`;
-  canvas.style.height = `${H}px`;
 
   const ctx = canvas.getContext('2d')!;
   ctx.scale(dpr, dpr);
@@ -913,6 +911,224 @@ export function renderShotMap(
       align: 'center',
     });
     plainText(ctx, stats[i][0], xPos, statsY + 68, SHOT_GREY, 28, {
+      align: 'center',
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Defensive Heatmap renderer
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const HEATMAP_CANVAS_W = 2200;
+export const HEATMAP_CANVAS_H = 1600;
+
+/**
+ * Render a defensive heatmap showing spatial density of Tackles & Interceptions.
+ * Uses a monochromatic team-colour density (transparent → light tint → full colour)
+ * to match the clean, minimal light style of the other graphics.
+ */
+export function renderDefensiveHeatmap(
+  canvas: HTMLCanvasElement,
+  events: GraphicEvent[],
+  options: HeatmapOptions,
+): void {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const W = HEATMAP_CANVAS_W;
+  const H = HEATMAP_CANVAS_H;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+
+  const bg = SHOT_BG;
+  const tc = options.teamColor || '#001E44';
+  const fc = SHOT_TEXT;
+
+  // Parse team colour into RGB components for the density ramp
+  const tcR = parseInt(tc.slice(1, 3), 16);
+  const tcG = parseInt(tc.slice(3, 5), 16);
+  const tcB = parseInt(tc.slice(5, 7), 16);
+
+  // ── Background ────────────────────────────────────────────────────────
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Filter defensive events ───────────────────────────────────────────
+  const defEvents = events.filter(e => {
+    const t = e.eventType.toLowerCase();
+    return t === 'tackle' || t === 'interception';
+  });
+
+  const tackles = defEvents.filter(e => e.eventType.toLowerCase() === 'tackle');
+  const interceptions = defEvents.filter(e => e.eventType.toLowerCase() === 'interception');
+
+  // ── Title area ────────────────────────────────────────────────────────
+  const titleY = 50;
+  plainText(ctx, options.teamName, W / 2, titleY, tc, 64, {
+    weight: 'bold',
+    align: 'center',
+  });
+  plainText(ctx, options.subtitle || 'Defensive Actions', W / 2, titleY + 76, fc, 36, {
+    weight: 'bold',
+    align: 'center',
+  });
+
+  // ── Legend strip ──────────────────────────────────────────────────────
+  const legendY = 195;
+
+  // Tackle legend
+  let lx = W * 0.12;
+  filledCircle(ctx, lx, legendY + 6, 12, tc, fc, 2);
+  plainText(ctx, `Tackles (${tackles.length})`, lx + 24, legendY - 8, fc, 26);
+  lx += ctx.measureText(`Tackles (${tackles.length})`).width + 80;
+
+  // Interception legend
+  diamond(ctx, lx, legendY + 6, 10, tc, fc, 2);
+  plainText(ctx, `Interceptions (${interceptions.length})`, lx + 22, legendY - 8, fc, 26);
+
+  // Density gradient legend (monochromatic: light tint → full team colour)
+  const gradX = W * 0.72;
+  const gradW = W * 0.18;
+  const gradH2 = 20;
+  const gradY = legendY - 4;
+  const hGrad = ctx.createLinearGradient(gradX, 0, gradX + gradW, 0);
+  hGrad.addColorStop(0, `rgba(${tcR}, ${tcG}, ${tcB}, 0.05)`);
+  hGrad.addColorStop(0.5, `rgba(${tcR}, ${tcG}, ${tcB}, 0.35)`);
+  hGrad.addColorStop(1, `rgba(${tcR}, ${tcG}, ${tcB}, 0.85)`);
+  ctx.fillStyle = hGrad;
+  ctx.fillRect(gradX, gradY, gradW, gradH2);
+  ctx.strokeStyle = SHOT_GREY;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(gradX, gradY, gradW, gradH2);
+  plainText(ctx, 'Low', gradX - 8, gradY - 2, SHOT_GREY, 20, { align: 'right' });
+  plainText(ctx, 'High', gradX + gradW + 8, gradY - 2, SHOT_GREY, 20);
+
+  // ── Pitch ─────────────────────────────────────────────────────────────
+  const pitchAspect = PL / PW;
+  const pitchPadX = 100;
+  const pitchPadTop = 250;
+  const pitchPadBot = 200;
+  const availW = W - pitchPadX * 2;
+  const availH = H - pitchPadTop - pitchPadBot;
+  let pitchW: number, pitchH: number;
+  if (availW / pitchAspect <= availH) {
+    pitchW = availW;
+    pitchH = availW / pitchAspect;
+  } else {
+    pitchH = availH;
+    pitchW = availH * pitchAspect;
+  }
+  const pitchRect: Rect = {
+    x: (W - pitchW) / 2,
+    y: pitchPadTop,
+    w: pitchW,
+    h: pitchH,
+  };
+  drawFullPitch(ctx, pitchRect, bg, fc);
+
+  // ── Monochromatic Kernel Density Overlay ──────────────────────────────
+  if (defEvents.length > 0) {
+    const GRID_W = 480;
+    const GRID_H = 320;
+    const sigma = 24;
+    const sigma2 = sigma * sigma;
+    const kernelRadius = Math.ceil(sigma * 3);
+
+    // Build density grid
+    const density = new Float64Array(GRID_W * GRID_H);
+    for (const ev of defEvents) {
+      const gx = (ev.startX / 100) * (GRID_W - 1);
+      const gy = (ev.startY / 100) * (GRID_H - 1);
+
+      const x0 = Math.max(0, Math.floor(gx - kernelRadius));
+      const x1 = Math.min(GRID_W - 1, Math.ceil(gx + kernelRadius));
+      const y0 = Math.max(0, Math.floor(gy - kernelRadius));
+      const y1 = Math.min(GRID_H - 1, Math.ceil(gy + kernelRadius));
+
+      for (let yi = y0; yi <= y1; yi++) {
+        for (let xi = x0; xi <= x1; xi++) {
+          const dx = xi - gx;
+          const dy = yi - gy;
+          const w = Math.exp(-(dx * dx + dy * dy) / (2 * sigma2));
+          density[yi * GRID_W + xi] += w;
+        }
+      }
+    }
+
+    let maxD = 0;
+    for (let i = 0; i < density.length; i++) {
+      if (density[i] > maxD) maxD = density[i];
+    }
+
+    // Paint monochromatic density using team colour
+    const heatCanvas = document.createElement('canvas');
+    heatCanvas.width = GRID_W;
+    heatCanvas.height = GRID_H;
+    const hctx = heatCanvas.getContext('2d')!;
+    const imgData = hctx.createImageData(GRID_W, GRID_H);
+
+    for (let i = 0; i < density.length; i++) {
+      const t = maxD > 0 ? density[i] / maxD : 0;
+      const idx = i * 4;
+      if (t < 0.02) {
+        imgData.data[idx] = 0;
+        imgData.data[idx + 1] = 0;
+        imgData.data[idx + 2] = 0;
+        imgData.data[idx + 3] = 0;
+      } else {
+        // Monochromatic ramp: team colour with increasing opacity
+        imgData.data[idx] = tcR;
+        imgData.data[idx + 1] = tcG;
+        imgData.data[idx + 2] = tcB;
+        imgData.data[idx + 3] = Math.round(15 + 210 * t); // 15-225 alpha
+      }
+    }
+    hctx.putImageData(imgData, 0, 0);
+
+    // Draw clipped to pitch
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(pitchRect.x, pitchRect.y, pitchRect.w, pitchRect.h);
+    ctx.clip();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(heatCanvas, pitchRect.x, pitchRect.y, pitchRect.w, pitchRect.h);
+    ctx.restore();
+
+    // Redraw pitch lines on top of the density overlay
+    drawFullPitch(ctx, pitchRect, 'transparent', fc);
+  }
+
+  // ── Plot individual event markers ─────────────────────────────────────
+  for (const ev of defEvents) {
+    const [px, py] = optaFull(ev.startX, ev.startY, pitchRect);
+    if (ev.eventType.toLowerCase() === 'tackle') {
+      filledCircle(ctx, px, py, 8, tc, '#FFFFFF', 2);
+    } else {
+      diamond(ctx, px, py, 8, tc, '#FFFFFF', 2);
+    }
+  }
+
+  // ── Stats strip ───────────────────────────────────────────────────────
+  const statsY = pitchRect.y + pitchRect.h + 50;
+  const totalDef = defEvents.length;
+  const heatStats = [
+    ['Defensive Actions', String(totalDef)],
+    ['Tackles', String(tackles.length)],
+    ['Interceptions', String(interceptions.length)],
+    ['Players', String(new Set(defEvents.map(e => e.playerName)).size)],
+  ];
+
+  const heatStatSpacing = W / (heatStats.length + 1);
+  for (let i = 0; i < heatStats.length; i++) {
+    const xPos = heatStatSpacing * (i + 1);
+    plainText(ctx, heatStats[i][1], xPos, statsY, tc, 56, {
+      weight: 'bold',
+      align: 'center',
+    });
+    plainText(ctx, heatStats[i][0], xPos, statsY + 68, SHOT_GREY, 28, {
       align: 'center',
     });
   }

@@ -5,15 +5,19 @@ import {
   GraphicEvent,
   PlayupMapOptions,
   ShotMapOptions,
+  HeatmapOptions,
   renderPlayupMap,
   renderShotMap,
+  renderDefensiveHeatmap,
   PLAYUP_CANVAS_W,
   PLAYUP_CANVAS_H,
   SHOT_CANVAS_W,
   SHOT_CANVAS_H,
+  HEATMAP_CANVAS_W,
+  HEATMAP_CANVAS_H,
 } from '../utils/pitchRenderer';
 
-type GraphicType = 'playup' | 'shotxg';
+type GraphicType = 'playup' | 'shotxg' | 'heatmap';
 type DataSource = 'app' | 'csv';
 
 // ── CSV parser ──────────────────────────────────────────────────────────────
@@ -140,6 +144,9 @@ export function GraphicGenerator() {
   const shotCount = filteredEvents.filter(
     e => e.eventType === 'Shot' || e.eventType === 'Goal',
   ).length;
+  const defCount = filteredEvents.filter(
+    e => e.eventType === 'Tackle' || e.eventType === 'Interception',
+  ).length;
 
   // ── Handlers ──────────────────────────────────────────────────────────
 
@@ -168,7 +175,7 @@ export function GraphicGenerator() {
         teamColor,
       };
       renderPlayupMap(canvas, filteredEvents, opts);
-    } else {
+    } else if (graphicType === 'shotxg') {
       const opts: ShotMapOptions = {
         teamName: displayName,
         subtitle: subtitle || '',
@@ -176,6 +183,13 @@ export function GraphicGenerator() {
         sizeBy,
       };
       renderShotMap(canvas, filteredEvents, opts);
+    } else {
+      const opts: HeatmapOptions = {
+        teamName: displayName,
+        subtitle: subtitle || '',
+        teamColor,
+      };
+      renderDefensiveHeatmap(canvas, filteredEvents, opts);
     }
     setGenerated(true);
   }, [graphicType, filteredEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, sizeBy, customTeamName]);
@@ -192,12 +206,8 @@ export function GraphicGenerator() {
   }, [filename, generated]);
 
   // ── Canvas display dimensions ─────────────────────────────────────────
-  // The renderer sets canvas.width/height to logical × dpr for crispness.
-  // CSS display is at logical (1×) size. Scale to fit preview area.
-  const canvasW = graphicType === 'playup' ? PLAYUP_CANVAS_W : SHOT_CANVAS_W;
-  const canvasH = graphicType === 'playup' ? PLAYUP_CANVAS_H : SHOT_CANVAS_H;
-  const maxPreviewW = 700;
-  const scale = Math.min(1, maxPreviewW / canvasW);
+  const canvasW = graphicType === 'playup' ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : HEATMAP_CANVAS_W;
+  const canvasH = graphicType === 'playup' ? PLAYUP_CANVAS_H : graphicType === 'shotxg' ? SHOT_CANVAS_H : HEATMAP_CANVAS_H;
 
   // ═════════════════════════════════════════════════════════════════════
   //  Render
@@ -217,6 +227,7 @@ export function GraphicGenerator() {
           >
             <option value="playup">Playup Map</option>
             <option value="shotxg">Shot / xG Map</option>
+            <option value="heatmap">Defensive Heatmap</option>
           </select>
         </label>
 
@@ -354,7 +365,8 @@ export function GraphicGenerator() {
           onClick={generate}
           disabled={
             (graphicType === 'playup' && playupCount === 0) ||
-            (graphicType === 'shotxg' && shotCount === 0)
+            (graphicType === 'shotxg' && shotCount === 0) ||
+            (graphicType === 'heatmap' && defCount === 0)
           }
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
         >
@@ -375,7 +387,9 @@ export function GraphicGenerator() {
         <span className="text-xs text-gray-500 dark:text-gray-400">
           {graphicType === 'playup'
             ? `${playupCount} playup event${playupCount !== 1 ? 's' : ''} available`
-            : `${shotCount} shot/goal event${shotCount !== 1 ? 's' : ''} available`}
+            : graphicType === 'shotxg'
+            ? `${shotCount} shot/goal event${shotCount !== 1 ? 's' : ''} available`
+            : `${defCount} tackle/interception event${defCount !== 1 ? 's' : ''} available`}
         </span>
       </div>
 
@@ -390,8 +404,10 @@ export function GraphicGenerator() {
           <canvas
             ref={canvasRef}
             style={{
-              width: canvasW * scale,
-              height: canvasH * scale,
+              maxWidth: canvasW >= canvasH ? '600px' : '350px',
+              maxHeight: '65vh',
+              width: canvasW >= canvasH ? '100%' : 'auto',
+              height: canvasW >= canvasH ? 'auto' : '65vh',
               borderRadius: 8,
               boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
             }}
