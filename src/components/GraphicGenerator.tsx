@@ -6,18 +6,24 @@ import {
   PlayupMapOptions,
   ShotMapOptions,
   HeatmapOptions,
+  XGTimelineOptions,
+  XGTimelineEvent,
   renderPlayupMap,
   renderShotMap,
   renderDefensiveHeatmap,
+  renderXGTimeline,
   PLAYUP_CANVAS_W,
   PLAYUP_CANVAS_H,
   SHOT_CANVAS_W,
   SHOT_CANVAS_H,
   HEATMAP_CANVAS_W,
   HEATMAP_CANVAS_H,
+  XG_TIMELINE_W,
+  XG_TIMELINE_H,
 } from '../utils/pitchRenderer';
+import { computeShotFeatures, predictXg } from '../utils/xgModel';
 
-type GraphicType = 'playup' | 'shotxg' | 'heatmap';
+type GraphicType = 'playup' | 'shotxg' | 'heatmap' | 'xgtimeline';
 type DataSource = 'app' | 'csv';
 
 // ── CSV parser ──────────────────────────────────────────────────────────────
@@ -79,6 +85,7 @@ export function GraphicGenerator() {
   const [subtitle, setSubtitle] = useState('');
   const [filename, setFilename] = useState('graphic.png');
   const [teamColor, setTeamColor] = useState('#001E44');
+  const [team2Color, setTeam2Color] = useState('#C41E3A');
   const [sizeBy, setSizeBy] = useState<'xg' | 'distance'>('xg');
   const [generated, setGenerated] = useState(false);
 
@@ -183,16 +190,59 @@ export function GraphicGenerator() {
         sizeBy,
       };
       renderShotMap(canvas, filteredEvents, opts);
-    } else {
+    } else if (graphicType === 'heatmap') {
       const opts: HeatmapOptions = {
         teamName: displayName,
         subtitle: subtitle || '',
         teamColor,
       };
       renderDefensiveHeatmap(canvas, filteredEvents, opts);
+    } else if (graphicType === 'xgtimeline') {
+      // Build XGTimelineEvents from ALL events (both teams needed for timeline)
+      const sourceEvents = dataSource === 'app' ? appGraphicEvents : csvEvents;
+      const xgEvents: XGTimelineEvent[] = sourceEvents
+        .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
+        .map(e => {
+          // Mirror shots attacking left so xG model always sees "attacking right"
+          let sx = e.startX;
+          let sy = e.startY;
+          if (e.endX < 50) {
+            sx = 100 - sx;
+            sy = 100 - sy;
+          }
+          const { dist, angle } = computeShotFeatures(sx, sy);
+          const xg = predictXg(dist, angle);
+          return {
+            matchMinute: 0,
+            eventType: e.eventType,
+            playerName: e.playerName,
+            team: e.playerTeam,
+            xg,
+          };
+        })
+        .map((e, i, arr) => ({ ...e, matchMinute: ((i + 1) / arr.length) * 90 }));
+
+      // Also use real timestamps from in-app events when available
+      if (dataSource === 'app') {
+        const shotAppEvents = appEvents
+          .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
+          .sort((a, b) => a.videoTimestamp - b.videoTimestamp);
+        for (let i = 0; i < xgEvents.length && i < shotAppEvents.length; i++) {
+          xgEvents[i].matchMinute = shotAppEvents[i].videoTimestamp / 60;
+        }
+      }
+
+      const opts: XGTimelineOptions = {
+        team1Name: teams[0] || teamNames.team1 || 'Team 1',
+        team2Name: teams[1] || teamNames.team2 || 'Team 2',
+        team1Color: teamColor,
+        team2Color: team2Color,
+        subtitle: subtitle || '',
+      };
+      renderXGTimeline(canvas, xgEvents, opts);
     }
     setGenerated(true);
-  }, [graphicType, filteredEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, sizeBy, customTeamName]);
+  }, [graphicType, filteredEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, appEvents]);
 
   const exportPNG = useCallback(() => {
     const canvas = canvasRef.current;
@@ -205,9 +255,14 @@ export function GraphicGenerator() {
     document.body.removeChild(link);
   }, [filename, generated]);
 
+  // ── Relevant xG timeline shot count (uses all events, not team-filtered) ──
+  const xgTimelineShotCount = allEvents.filter(
+    e => e.eventType === 'Shot' || e.eventType === 'Goal',
+  ).length;
+
   // ── Canvas display dimensions ─────────────────────────────────────────
-  const canvasW = graphicType === 'playup' ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : HEATMAP_CANVAS_W;
-  const canvasH = graphicType === 'playup' ? PLAYUP_CANVAS_H : graphicType === 'shotxg' ? SHOT_CANVAS_H : HEATMAP_CANVAS_H;
+  const canvasW = graphicType === 'playup' ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : graphicType === 'xgtimeline' ? XG_TIMELINE_W : HEATMAP_CANVAS_W;
+  const canvasH = graphicType === 'playup' ? PLAYUP_CANVAS_H : graphicType === 'shotxg' ? SHOT_CANVAS_H : graphicType === 'xgtimeline' ? XG_TIMELINE_H : HEATMAP_CANVAS_H;
 
   // ═════════════════════════════════════════════════════════════════════
   //  Render
@@ -228,6 +283,7 @@ export function GraphicGenerator() {
             <option value="playup">Playup Map</option>
             <option value="shotxg">Shot / xG Map</option>
             <option value="heatmap">Defensive Heatmap</option>
+            <option value="xgtimeline">xG Timeline</option>
           </select>
         </label>
 
@@ -331,7 +387,7 @@ export function GraphicGenerator() {
 
         {/* Team colour */}
         <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
-          Team Color
+          {graphicType === 'xgtimeline' ? 'Team 1 Color' : 'Team Color'}
           <div className="flex items-center gap-1.5">
             <input
               type="color"
@@ -342,6 +398,22 @@ export function GraphicGenerator() {
             <span className="text-[10px] font-mono text-gray-500">{teamColor}</span>
           </div>
         </label>
+
+        {/* Team 2 colour (xG timeline only) */}
+        {graphicType === 'xgtimeline' && (
+          <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+            Team 2 Color
+            <div className="flex items-center gap-1.5">
+              <input
+                type="color"
+                value={team2Color}
+                onChange={e => { setTeam2Color(e.target.value); setGenerated(false); }}
+                className="w-8 h-8 rounded border border-gray-300 dark:border-gray-700 cursor-pointer"
+              />
+              <span className="text-[10px] font-mono text-gray-500">{team2Color}</span>
+            </div>
+          </label>
+        )}
 
         {/* Size By (shot map only) */}
         {graphicType === 'shotxg' && (
@@ -366,7 +438,8 @@ export function GraphicGenerator() {
           disabled={
             (graphicType === 'playup' && playupCount === 0) ||
             (graphicType === 'shotxg' && shotCount === 0) ||
-            (graphicType === 'heatmap' && defCount === 0)
+            (graphicType === 'heatmap' && defCount === 0) ||
+            (graphicType === 'xgtimeline' && xgTimelineShotCount === 0)
           }
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
         >
@@ -389,6 +462,8 @@ export function GraphicGenerator() {
             ? `${playupCount} playup event${playupCount !== 1 ? 's' : ''} available`
             : graphicType === 'shotxg'
             ? `${shotCount} shot/goal event${shotCount !== 1 ? 's' : ''} available`
+            : graphicType === 'xgtimeline'
+            ? `${xgTimelineShotCount} shot/goal event${xgTimelineShotCount !== 1 ? 's' : ''} available`
             : `${defCount} tackle/interception event${defCount !== 1 ? 's' : ''} available`}
         </span>
       </div>

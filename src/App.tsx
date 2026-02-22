@@ -5,12 +5,14 @@ import { ThemeProvider } from './context/ThemeContext';
 import { LayoutProvider } from './context/LayoutContext';
 import { DrillProvider } from './context/DrillContext';
 import { SessionProvider, useSession } from './context/SessionContext';
+import { TimerProvider } from './context/TimerContext';
 import { useLayout } from './context/LayoutContext';
 import { TaggingPage } from './components/TaggingPage';
 import { GraphicGenerator } from './components/GraphicGenerator';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RosterManager } from './components/RosterManager';
 import { SessionSetupModal } from './components/SessionSetupModal';
+import { MatchTimer } from './components/MatchTimer';
 type AppPage = 'tagging' | 'graphics';
 
 function HeaderActions() {
@@ -139,6 +141,7 @@ function AppContent() {
           </nav>
         </div>
         <div className="flex items-center gap-2">
+          {page === 'tagging' && <MatchTimer />}
           <RosterManager />
           {page === 'tagging' && <HeaderActions />}
           <ThemeToggle />
@@ -164,7 +167,9 @@ function App() {
         <EventProvider>
           <DrillProvider>
             <SessionProvider>
-              <AppContent />
+              <TimerProvider>
+                <AppContent />
+              </TimerProvider>
             </SessionProvider>
           </DrillProvider>
         </EventProvider>

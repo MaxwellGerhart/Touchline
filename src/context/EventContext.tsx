@@ -7,6 +7,7 @@ interface EventContextType {
   addEvent: (event: Omit<MatchEvent, 'id' | 'createdAt'>) => void;
   addPlayupEvent: (passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number) => void;
   deleteEvent: (id: string) => void;
+  updateEventTime: (id: string, newTimestamp: number) => void;
   clearEvents: () => void;
   selectedPlayer: number | null;
   selectedTeam: TeamId | null;
@@ -270,6 +271,14 @@ export function EventProvider({ children }: { children: ReactNode }) {
     }
   }, [highlightedEventId]);
 
+  const updateEventTime = useCallback((id: string, newTimestamp: number) => {
+    setEvents(prev =>
+      prev
+        .map(e => (e.id === id ? { ...e, videoTimestamp: Math.max(0, newTimestamp) } : e))
+        .sort((a, b) => a.videoTimestamp - b.videoTimestamp)
+    );
+  }, []);
+
   const clearEvents = useCallback(() => {
     setEvents([]);
     setHighlightedEventId(null);
@@ -326,6 +335,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
         addEvent,
         addPlayupEvent,
         deleteEvent,
+        updateEventTime,
         clearEvents,
         selectedPlayer,
         selectedTeam,

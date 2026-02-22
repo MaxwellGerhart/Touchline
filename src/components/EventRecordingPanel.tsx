@@ -3,6 +3,7 @@ import { Plus, X, Edit2, Check, Eye, UserPlus, Target, ZoomIn, ZoomOut } from 'l
 import { useEvents } from '../context/EventContext';
 import { useDrill } from '../context/DrillContext';
 import { useSession } from '../context/SessionContext';
+import { useTimer } from '../context/TimerContext';
 import { TeamId, Player, RosterPlayer, distanceToGoal } from '../types';
 
 export function EventRecordingPanel() {
@@ -38,6 +39,10 @@ export function EventRecordingPanel() {
 
   const { isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive, setIsDrillActive, setDrawingForNewSession } = useDrill();
   const { activeSession, updateSession } = useSession();
+  const { matchMinute, status: timerStatus } = useTimer();
+
+  // Use match-timer elapsed seconds when the timer has been used, otherwise fall back to video time
+  const effectiveTime = timerStatus !== 'stopped' ? matchMinute : currentVideoTime;
 
   const [newEventType, setNewEventType] = useState('');
   const [showAddInput, setShowAddInput] = useState(false);
@@ -140,7 +145,7 @@ export function EventRecordingPanel() {
       const passer = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
       const receiver = players.find(p => p.id === playupReceiver && p.team === playupReceiverTeam);
       if (!passer || !receiver) return;
-      addPlayupEvent(passer, receiver, startLocation, endLocation, currentVideoTime);
+      addPlayupEvent(passer, receiver, startLocation, endLocation, effectiveTime);
     } else {
       if (selectedPlayer === null || selectedTeam === null || selectedEventType === null || startLocation === null) return;
       const player = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
@@ -161,7 +166,7 @@ export function EventRecordingPanel() {
       }
 
       addEvent({
-        videoTimestamp: currentVideoTime,
+        videoTimestamp: effectiveTime,
         playerId: selectedPlayer,
         playerName: player.name,
         playerTeam: selectedTeam,

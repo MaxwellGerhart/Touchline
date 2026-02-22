@@ -1133,3 +1133,328 @@ export function renderDefensiveHeatmap(
     });
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  xG Timeline renderer
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const XG_TIMELINE_W = 2200;
+export const XG_TIMELINE_H = 1400;
+
+export interface XGTimelineEvent {
+  matchMinute: number;   // 0–90+
+  eventType: string;     // 'Shot' | 'Goal' etc.
+  playerName: string;
+  team: string | number; // team identifier
+  xg: number;            // expected goals value for this shot
+}
+
+export interface XGTimelineOptions {
+  team1Name: string;
+  team2Name: string;
+  team1Color: string;
+  team2Color: string;
+  subtitle?: string;
+  /** Maximum match minute shown on the x-axis (default 90) */
+  maxMinute?: number;
+}
+
+export function renderXGTimeline(
+  canvas: HTMLCanvasElement,
+  events: XGTimelineEvent[],
+  options: XGTimelineOptions,
+): void {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const W = XG_TIMELINE_W;
+  const H = XG_TIMELINE_H;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+
+  const bg = SHOT_BG;
+  const fc = SHOT_TEXT;
+  const t1c = options.team1Color || '#001E44';
+  const t2c = options.team2Color || '#C41E3A';
+  const maxMin = options.maxMinute ?? 90;
+
+  // ── Background ────────────────────────────────────────────────────────
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Title ─────────────────────────────────────────────────────────────
+  const titleY = 50;
+  plainText(ctx, 'xG Timeline', W / 2, titleY, fc, 56, {
+    weight: 'bold',
+    align: 'center',
+  });
+  if (options.subtitle) {
+    plainText(ctx, options.subtitle, W / 2, titleY + 68, SHOT_GREY, 30, {
+      align: 'center',
+    });
+  }
+
+  // ── Legend ────────────────────────────────────────────────────────────
+  const legendY = options.subtitle ? 175 : 140;
+  const legL = W * 0.3;
+
+  // Team 1 legend
+  line(ctx, legL - 40, legendY, legL, legendY, t1c, 4);
+  filledCircle(ctx, legL - 20, legendY, 6, t1c);
+  plainText(ctx, options.team1Name, legL + 14, legendY - 12, fc, 26);
+
+  // Team 2 legend
+  const legR = W * 0.65;
+  line(ctx, legR - 40, legendY, legR, legendY, t2c, 4);
+  filledCircle(ctx, legR - 20, legendY, 6, t2c);
+  plainText(ctx, options.team2Name, legR + 14, legendY - 12, fc, 26);
+
+  // Goal marker legend
+  const legG = W * 0.88;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(legG - 20, legendY, 10, 0, Math.PI * 2);
+  ctx.strokeStyle = fc;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = bg;
+  ctx.fill();
+  // Draw small star inside
+  drawStar(ctx, legG - 20, legendY, 6, fc);
+  ctx.restore();
+  plainText(ctx, 'Goal', legG, legendY - 12, fc, 26);
+
+  // ── Chart area ────────────────────────────────────────────────────────
+  const chartLeft = 140;
+  const chartRight = W - 80;
+  const chartTop = legendY + 55;
+  const chartBottom = H - 200;
+  const chartW = chartRight - chartLeft;
+  const chartH = chartBottom - chartTop;
+
+  // ── Separate events by team ───────────────────────────────────────────
+  const sorted = [...events]
+    .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
+    .sort((a, b) => a.matchMinute - b.matchMinute);
+
+  const isTeam1 = (e: XGTimelineEvent) => {
+    const t = String(e.team);
+    return t === '1' || t === options.team1Name;
+  };
+
+  // Build cumulative series for each team
+  interface Point { minute: number; cumulXg: number; isGoal: boolean; playerName: string; xg: number; }
+
+  const team1Points: Point[] = [{ minute: 0, cumulXg: 0, isGoal: false, playerName: '', xg: 0 }];
+  const team2Points: Point[] = [{ minute: 0, cumulXg: 0, isGoal: false, playerName: '', xg: 0 }];
+
+  let t1cumul = 0;
+  let t2cumul = 0;
+  for (const ev of sorted) {
+    if (isTeam1(ev)) {
+      t1cumul += ev.xg;
+      team1Points.push({
+        minute: ev.matchMinute,
+        cumulXg: t1cumul,
+        isGoal: ev.eventType === 'Goal',
+        playerName: ev.playerName,
+        xg: ev.xg,
+      });
+    } else {
+      t2cumul += ev.xg;
+      team2Points.push({
+        minute: ev.matchMinute,
+        cumulXg: t2cumul,
+        isGoal: ev.eventType === 'Goal',
+        playerName: ev.playerName,
+        xg: ev.xg,
+      });
+    }
+  }
+
+  // Extend lines to max minute
+  if (team1Points[team1Points.length - 1].minute < maxMin) {
+    team1Points.push({ ...team1Points[team1Points.length - 1], minute: maxMin });
+  }
+  if (team2Points[team2Points.length - 1].minute < maxMin) {
+    team2Points.push({ ...team2Points[team2Points.length - 1], minute: maxMin });
+  }
+
+  // Max xG for y-axis scaling
+  const maxXg = Math.max(t1cumul, t2cumul, 0.5);
+  const yMax = Math.ceil(maxXg * 4) / 4; // round up to nearest 0.25
+
+  // ── Axes and grid ─────────────────────────────────────────────────────
+  const gridColor = '#CCCCCC';
+  const axisColor = '#666666';
+
+  // Horizontal gridlines + y-axis labels
+  const ySteps = Math.max(1, Math.ceil(yMax / 0.5));
+  for (let i = 0; i <= ySteps; i++) {
+    const val = (i * yMax) / ySteps;
+    const py = chartBottom - (val / yMax) * chartH;
+    line(ctx, chartLeft, py, chartRight, py, gridColor, 1);
+    plainText(ctx, val.toFixed(2), chartLeft - 16, py - 10, axisColor, 22, {
+      align: 'right',
+    });
+  }
+
+  // Vertical gridlines + x-axis labels (every 15 minutes)
+  const xTicks = [0, 15, 30, 45, 60, 75, 90].filter(v => v <= maxMin);
+  for (const min of xTicks) {
+    const px = chartLeft + (min / maxMin) * chartW;
+    line(ctx, px, chartTop, px, chartBottom, gridColor, 1);
+    plainText(ctx, `${min}'`, px, chartBottom + 12, axisColor, 22, {
+      align: 'center',
+    });
+  }
+
+  // Half-time dotted line at 45'
+  if (maxMin > 45) {
+    const htX = chartLeft + (45 / maxMin) * chartW;
+    ctx.save();
+    ctx.setLineDash([8, 6]);
+    line(ctx, htX, chartTop, htX, chartBottom, '#999999', 2);
+    ctx.restore();
+    plainText(ctx, 'HT', htX, chartTop - 28, '#999999', 20, { align: 'center' });
+  }
+
+  // Axis borders
+  line(ctx, chartLeft, chartBottom, chartRight, chartBottom, axisColor, 2);
+  line(ctx, chartLeft, chartTop, chartLeft, chartBottom, axisColor, 2);
+
+  // Y-axis label
+  ctx.save();
+  ctx.translate(40, chartTop + chartH / 2);
+  ctx.rotate(-Math.PI / 2);
+  plainText(ctx, 'Cumulative xG', 0, 0, axisColor, 24, {
+    weight: 'bold',
+    align: 'center',
+  });
+  ctx.restore();
+
+  // X-axis label
+  plainText(ctx, 'Match Minute', chartLeft + chartW / 2, chartBottom + 55, axisColor, 24, {
+    weight: 'bold',
+    align: 'center',
+  });
+
+  // ── Helper to convert data to canvas coordinates ──────────────────────
+  const toCanvasX = (min: number) => chartLeft + (min / maxMin) * chartW;
+  const toCanvasY = (xg: number) => chartBottom - (xg / yMax) * chartH;
+
+  // ── Draw team lines (step function style) ─────────────────────────────
+  function drawTeamLine(points: Point[], color: string) {
+    if (points.length < 2) return;
+
+    ctx.beginPath();
+    ctx.moveTo(toCanvasX(points[0].minute), toCanvasY(points[0].cumulXg));
+
+    for (let i = 1; i < points.length; i++) {
+      // Horizontal step first, then vertical
+      const prevY = toCanvasY(points[i - 1].cumulXg);
+      const curX = toCanvasX(points[i].minute);
+      const curY = toCanvasY(points[i].cumulXg);
+
+      ctx.lineTo(curX, prevY);
+      ctx.lineTo(curX, curY);
+    }
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3.5;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+
+  drawTeamLine(team1Points, t1c);
+  drawTeamLine(team2Points, t2c);
+
+  // ── Draw event markers ────────────────────────────────────────────────
+  function drawEventMarkers(points: Point[], color: string) {
+    for (const pt of points) {
+      if (pt.minute === 0 && pt.cumulXg === 0) continue;
+      const cx = toCanvasX(pt.minute);
+      const cy = toCanvasY(pt.cumulXg);
+
+      if (pt.isGoal) {
+        // Goal: larger circle with star marker
+        filledCircle(ctx, cx, cy, 14, color, '#FFFFFF', 3);
+        drawStar(ctx, cx, cy, 8, '#FFFFFF');
+      } else {
+        // Shot: simple dot
+        filledCircle(ctx, cx, cy, 6, color, '#FFFFFF', 2);
+      }
+    }
+  }
+
+  drawEventMarkers(team1Points, t1c);
+  drawEventMarkers(team2Points, t2c);
+
+  // ── Goal labels ───────────────────────────────────────────────────────
+  function drawGoalLabels(points: Point[], color: string, above: boolean) {
+    for (const pt of points) {
+      if (!pt.isGoal) continue;
+      const cx = toCanvasX(pt.minute);
+      const cy = toCanvasY(pt.cumulXg);
+      const labelY = above ? cy - 32 : cy + 22;
+
+      // Player name
+      plainText(ctx, pt.playerName, cx, labelY, color, 20, {
+        weight: 'bold',
+        align: 'center',
+      });
+      // Minute
+      plainText(ctx, `${Math.round(pt.minute)}'`, cx, labelY + (above ? -22 : 22), SHOT_GREY, 18, {
+        align: 'center',
+      });
+    }
+  }
+
+  drawGoalLabels(team1Points, t1c, true);
+  drawGoalLabels(team2Points, t2c, false);
+
+  // ── Final xG Summary ─────────────────────────────────────────────────
+  const summaryY = chartBottom + 95;
+  const t1Goals = team1Points.filter(p => p.isGoal).length;
+  const t2Goals = team2Points.filter(p => p.isGoal).length;
+
+  const statsItems = [
+    [options.team1Name, `${t1Goals} goal${t1Goals !== 1 ? 's' : ''}`, t1cumul.toFixed(2) + ' xG'],
+    [options.team2Name, `${t2Goals} goal${t2Goals !== 1 ? 's' : ''}`, t2cumul.toFixed(2) + ' xG'],
+  ];
+
+  const statSpacing = W / 3;
+  for (let i = 0; i < statsItems.length; i++) {
+    const xPos = statSpacing * (i + 1);
+    const teamCol = i === 0 ? t1c : t2c;
+    plainText(ctx, statsItems[i][0], xPos, summaryY, teamCol, 36, {
+      weight: 'bold',
+      align: 'center',
+    });
+    plainText(ctx, `${statsItems[i][1]}  •  ${statsItems[i][2]}`, xPos, summaryY + 44, SHOT_GREY, 26, {
+      align: 'center',
+    });
+  }
+}
+
+/** Draw a small 5-point star */
+function drawStar(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  color: string,
+) {
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const angle = (i * 4 * Math.PI) / 5 - Math.PI / 2;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}

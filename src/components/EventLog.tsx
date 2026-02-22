@@ -1,19 +1,64 @@
-
-import { Trash2, Download, FileSpreadsheet } from 'lucide-react';
+import { useState, useRef, useCallback, KeyboardEvent } from 'react';
+import { Trash2, Download, FileSpreadsheet, Pencil } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
 import { useSession } from '../context/SessionContext';
 import { formatTimestamp } from '../utils/formatters';
 import { exportToCSV } from '../utils/export';
 
+/** Parse a mm:ss or m:ss string into total seconds, or null if invalid. */
+function parseTimeInput(value: string): number | null {
+  const trimmed = value.trim();
+  // Try mm:ss
+  const colonMatch = trimmed.match(/^(\d{1,3}):(\d{1,2})$/);
+  if (colonMatch) {
+    const mins = parseInt(colonMatch[1], 10);
+    const secs = parseInt(colonMatch[2], 10);
+    if (secs >= 60) return null;
+    return mins * 60 + secs;
+  }
+  // Try plain number (seconds)
+  const num = parseFloat(trimmed);
+  if (!isNaN(num) && num >= 0) return Math.round(num);
+  return null;
+}
+
 export function EventLog() {
   const {
     events,
     deleteEvent,
+    updateEventTime,
     highlightedEventId,
     setHighlightedEventId,
     resetSelection,
     teamNames,
   } = useEvents();
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startEditing = useCallback((eventId: string, currentTimestamp: number) => {
+    setEditingId(eventId);
+    setEditValue(formatTimestamp(currentTimestamp));
+    // Focus input after render
+    setTimeout(() => inputRef.current?.select(), 0);
+  }, []);
+
+  const commitEdit = useCallback((eventId: string) => {
+    const seconds = parseTimeInput(editValue);
+    if (seconds !== null) {
+      updateEventTime(eventId, seconds);
+    }
+    setEditingId(null);
+  }, [editValue, updateEventTime]);
+
+  const handleEditKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>, eventId: string) => {
+    if (e.key === 'Enter') {
+      commitEdit(eventId);
+    } else if (e.key === 'Escape') {
+      setEditingId(null);
+    }
+  }, [commitEdit]);
 
   const { activeSession } = useSession();
 
@@ -90,9 +135,29 @@ export function EventLog() {
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <span className="text-xs font-mono text-gray-500 dark:text-gray-400">
-                    {formatTimestamp(event.videoTimestamp)}
-                  </span>
+                  {editingId === event.id ? (
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={editValue}
+                      onChange={e => setEditValue(e.target.value)}
+                      onBlur={() => commitEdit(event.id)}
+                      onKeyDown={e => handleEditKeyDown(e, event.id)}
+                      onClick={e => e.stopPropagation()}
+                      className="w-14 text-xs font-mono px-1 py-0.5 rounded border border-blue-400 dark:border-blue-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-blue-500"
+                      aria-label="Edit event time"
+                    />
+                  ) : (
+                    <button
+                      onClick={e => { e.stopPropagation(); startEditing(event.id, event.videoTimestamp); }}
+                      className="text-xs font-mono text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors group/time flex items-center gap-0.5"
+                      title="Click to edit time"
+                      aria-label={`Edit time ${formatTimestamp(event.videoTimestamp)}`}
+                    >
+                      {formatTimestamp(event.videoTimestamp)}
+                      <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/time:opacity-60 transition-opacity" />
+                    </button>
+                  )}
                   <span className={`px-1.5 py-0.5 rounded text-xs font-medium text-white ${getEventTypeColor(event.eventType)}`}>
                     {event.eventType}
                   </span>
