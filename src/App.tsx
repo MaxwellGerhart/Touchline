@@ -7,10 +7,11 @@ import { DrillProvider } from './context/DrillContext';
 import { SessionProvider, useSession } from './context/SessionContext';
 import { useLayout } from './context/LayoutContext';
 import { TaggingPage } from './components/TaggingPage';
+import { GraphicGenerator } from './components/GraphicGenerator';
 import { ThemeToggle } from './components/ThemeToggle';
 import { RosterManager } from './components/RosterManager';
 import { SessionSetupModal } from './components/SessionSetupModal';
-type AppPage = 'tagging';
+type AppPage = 'tagging' | 'graphics';
 
 function HeaderActions() {
   const { setLeftColumnWidth, setLeftTopHeight, setRightTopHeight } = useLayout();
@@ -125,7 +126,16 @@ function AppContent() {
             >
               Tagging
             </button>
-            {/* Removed Tactics and Replay buttons */}
+            <button
+              onClick={() => setPage('graphics')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                page === 'graphics'
+                  ? 'bg-navy text-white dark:bg-rose-500 dark:text-white'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'
+              }`}
+            >
+              Graphics
+            </button>
           </nav>
         </div>
         <div className="flex items-center gap-2">
@@ -138,7 +148,7 @@ function AppContent() {
       {/* Page content */}
       <div className="flex-1 flex flex-col min-h-0">
         {page === 'tagging' && <TaggingPage />}
-        {/* Removed Tactics and Replay pages */}
+        {page === 'graphics' && <GraphicGenerator />}
       </div>
 
       {/* Session setup modal */}
