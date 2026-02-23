@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { MatchEvent, EventType, Position, DEFAULT_PLAYERS, Player, DEFAULT_EVENT_TYPES, TeamId, TeamNames, DEFAULT_TEAM_NAMES, PlayerDisplayMode, Roster, RosterPlayer } from '../types';
+import { parseCSV, mergeEvents, findNewPlayers } from '../utils/importCsv';
 
 interface EventContextType {
   events: MatchEvent[];
@@ -50,6 +51,8 @@ interface EventContextType {
   setActiveRosterId: (id: string | null) => void;
   addRosterPlayerToTeam: (rosterPlayer: RosterPlayer, team: TeamId) => void;
   setPlayers: (players: Player[]) => void;
+  importEvents: (csvText: string) => { added: number; skipped: number; error?: string };
+  restoreEvents: (events: MatchEvent[]) => void;
 }
 
 
@@ -284,6 +287,10 @@ export function EventProvider({ children }: { children: ReactNode }) {
     setHighlightedEventId(null);
   }, []);
 
+  const restoreEvents = useCallback((snapshot: MatchEvent[]) => {
+    setEvents(snapshot.sort((a, b) => a.videoTimestamp - b.videoTimestamp));
+  }, []);
+
   const updatePlayerName = useCallback((id: number, name: string, team: TeamId) => {
     setPlayers(prev => prev.map(p => (p.id === id && p.team === team) ? { ...p, name } : p));
   }, []);
@@ -317,6 +324,43 @@ export function EventProvider({ children }: { children: ReactNode }) {
       setSelectedEventType(null);
     }
   }, [selectedEventType]);
+
+  const importEvents = useCallback((csvText: string): { added: number; skipped: number; error?: string } => {
+    const parsed = parseCSV(csvText);
+    if (parsed.error) {
+      return { added: 0, skipped: 0, error: parsed.error };
+    }
+    if (parsed.events.length === 0) {
+      return { added: 0, skipped: 0, error: 'No events found in the CSV file.' };
+    }
+
+    // Merge events
+    const { merged, added, skipped } = mergeEvents(events, parsed.events);
+    setEvents(merged.sort((a, b) => a.videoTimestamp - b.videoTimestamp));
+
+    // Add new players from the other team(s) to the roster
+    const newPlayers = findNewPlayers(parsed.events, players);
+    if (newPlayers.length > 0) {
+      setPlayers((prev: Player[]) => {
+        const updated = [...prev];
+        for (const np of newPlayers) {
+          if (!updated.some(p => p.id === np.id && p.team === np.team)) {
+            updated.push({ id: np.id, name: np.name, team: np.team });
+          }
+        }
+        return updated;
+      });
+    }
+
+    // Ensure any new event types are registered
+    const importedTypes = new Set(parsed.events.map(e => e.eventType));
+    setEventTypes((prev: string[]) => {
+      const newTypes = [...importedTypes].filter(t => !prev.includes(t));
+      return newTypes.length > 0 ? [...prev, ...newTypes] : prev;
+    });
+
+    return { added, skipped };
+  }, [events, players]);
 
   const resetSelection = useCallback(() => {
     setSelectedPlayerState(null);
@@ -377,6 +421,8 @@ export function EventProvider({ children }: { children: ReactNode }) {
         setActiveRosterId,
         addRosterPlayerToTeam,
         setPlayers,
+        importEvents,
+        restoreEvents,
       }}
     >
       {children}

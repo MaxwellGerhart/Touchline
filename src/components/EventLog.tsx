@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback, KeyboardEvent } from 'react';
-import { Trash2, Download, FileSpreadsheet, Pencil } from 'lucide-react';
+import { useState, useRef, useCallback, KeyboardEvent, ChangeEvent } from 'react';
+import { Trash2, Download, Upload, FileSpreadsheet, Pencil, Undo2 } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
 import { useSession } from '../context/SessionContext';
 import { formatTimestamp } from '../utils/formatters';
 import { exportToCSV } from '../utils/export';
+import { MatchEvent } from '../types';
 
 /** Parse a mm:ss or m:ss string into total seconds, or null if invalid. */
 function parseTimeInput(value: string): number | null {
@@ -31,11 +32,18 @@ export function EventLog() {
     setHighlightedEventId,
     resetSelection,
     teamNames,
+    importEvents,
+    clearEvents,
+    restoreEvents,
   } = useEvents();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [importMessage, setImportMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [undoSnapshot, setUndoSnapshot] = useState<MatchEvent[] | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const startEditing = useCallback((eventId: string, currentTimestamp: number) => {
     setEditingId(eventId);
@@ -71,6 +79,57 @@ export function EventLog() {
     exportToCSV(events, activeSession);
   };
 
+  const handleLoadGame = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleClear = useCallback(() => {
+    if (events.length === 0) return;
+    setUndoSnapshot([...events]);
+    clearEvents();
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => setUndoSnapshot(null), 10000);
+  }, [events, clearEvents]);
+
+  const handleUndo = useCallback(() => {
+    if (!undoSnapshot) return;
+    restoreEvents(undoSnapshot);
+    setUndoSnapshot(null);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+  }, [undoSnapshot, restoreEvents]);
+
+  const handleFileChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const csvText = evt.target?.result as string;
+      if (!csvText) {
+        setImportMessage({ text: 'Could not read file.', type: 'error' });
+        return;
+      }
+      const result = importEvents(csvText);
+      if (result.error) {
+        setImportMessage({ text: result.error, type: 'error' });
+      } else {
+        setImportMessage({
+          text: `Loaded ${result.added} event(s).${result.skipped > 0 ? ` ${result.skipped} duplicate(s) skipped.` : ''}`,
+          type: 'success',
+        });
+      }
+      // Auto-dismiss after 5 seconds
+      setTimeout(() => setImportMessage(null), 5000);
+    };
+    reader.onerror = () => {
+      setImportMessage({ text: 'Failed to read file.', type: 'error' });
+    };
+    reader.readAsText(file);
+
+    // Reset so the same file can be re-uploaded
+    e.target.value = '';
+  }, [importEvents]);
+
   const getEventTypeColor = (type: string): string => {
     const colors: Record<string, string> = {
       Pass: 'bg-blue-500',
@@ -95,22 +154,85 @@ export function EventLog() {
         <h3 className="text-xs font-semibold text-navy dark:text-white uppercase tracking-wide">
           Events ({events.length})
         </h3>
-        <button
-          onClick={handleExportCSV}
-          disabled={events.length === 0}
-          className={`
-            flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors
-            ${events.length > 0
-              ? 'bg-navy dark:bg-rose text-white hover:opacity-90'
-              : 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
-            }
-          `}
-          title="Export to CSV"
-        >
-          <Download className="w-3 h-3" />
-          <span>CSV</span>
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleLoadGame}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors bg-emerald-600 text-white hover:bg-emerald-700"
+            title="Load Game from CSV"
+          >
+            <Upload className="w-3 h-3" />
+            <span>Load</span>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+          <button
+            onClick={handleExportCSV}
+            disabled={events.length === 0}
+            className={`
+              flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors
+              ${events.length > 0
+                ? 'bg-navy dark:bg-rose text-white hover:opacity-90'
+                : 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+              }
+            `}
+            title="Export to CSV"
+          >
+            <Download className="w-3 h-3" />
+            <span>CSV</span>
+          </button>
+          <button
+            onClick={handleClear}
+            disabled={events.length === 0}
+            className={`
+              flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors
+              ${events.length > 0
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+              }
+            `}
+            title="Clear all events"
+          >
+            <Trash2 className="w-3 h-3" />
+            <span>Clear</span>
+          </button>
+        </div>
       </div>
+
+      {undoSnapshot && (
+        <div className="mb-2 px-2 py-1.5 rounded text-xs font-medium flex items-center justify-between bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300">
+          <span>Cleared {undoSnapshot.length} event(s)</span>
+          <button
+            onClick={handleUndo}
+            className="flex items-center gap-1 ml-2 px-1.5 py-0.5 rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+          >
+            <Undo2 className="w-3 h-3" />
+            Undo
+          </button>
+        </div>
+      )}
+
+      {importMessage && (
+        <div
+          className={`mb-2 px-2 py-1.5 rounded text-xs font-medium flex items-center justify-between ${
+            importMessage.type === 'success'
+              ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300'
+              : 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
+          }`}
+        >
+          <span>{importMessage.text}</span>
+          <button
+            onClick={() => setImportMessage(null)}
+            className="ml-2 opacity-60 hover:opacity-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {events.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400 text-xs">
