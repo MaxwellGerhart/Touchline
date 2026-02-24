@@ -146,7 +146,7 @@ export function GraphicGenerator() {
 
   // ── Relevant event counts ─────────────────────────────────────────────
   const playupCount = filteredEvents.filter(
-    e => e.eventType.toLowerCase() === 'playup',
+    e => ['playup platform', 'playup aaa'].includes(e.eventType.toLowerCase()),
   ).length;
   const shotCount = filteredEvents.filter(
     e => e.eventType === 'Shot' || e.eventType === 'Goal',

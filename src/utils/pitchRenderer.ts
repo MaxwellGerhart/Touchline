@@ -457,7 +457,7 @@ export function renderPlayupMap(
   ctx.fillRect(0, 0, W, H);
 
   // ── Extract playup & receiver events ──────────────────────────────────
-  const rawPlayups = events.filter(e => e.eventType.toLowerCase() === 'playup');
+  const rawPlayups = events.filter(e => ['playup platform', 'playup aaa'].includes(e.eventType.toLowerCase()));
   const receivedMap = new Map<string, string>();
   events
     .filter(e => e.eventType.toLowerCase() === 'playup received')
@@ -488,16 +488,14 @@ export function renderPlayupMap(
   });
 
   // ── Categorise playups by zone ──────────────────────────────────────────
-  // Final third starts at x ≈ 66.67 (after normalisation, all attack right)
-  const FINAL_THIRD = 66.67;
   const betweenColor = tc;                          // team colour
   const behindColor  = adjustColor(tc, 0, 0.35);    // lighter tint of team colour
 
-  const behindCount  = playups.filter(p => p.endX >= FINAL_THIRD).length;
-  const betweenCount = playups.length - behindCount;
+  const behindCount  = playups.filter(p => p.eventType.toLowerCase() === 'playup aaa').length;
+  const betweenCount = playups.filter(p => p.eventType.toLowerCase() === 'playup platform').length;
 
   function playupColor(pu: GraphicEvent): string {
-    return pu.endX >= FINAL_THIRD ? behindColor : betweenColor;
+    return pu.eventType.toLowerCase() === 'playup aaa' ? behindColor : betweenColor;
   }
 
   const counts: Record<string, number> = {};
@@ -519,16 +517,16 @@ export function renderPlayupMap(
   // ── Legend strip (zone categories) ────────────────────────────────────
   const legendY = 195;
 
-  // "Between Lines" legend
+  // "Platform" legend
   let lx = W * 0.12;
   filledCircle(ctx, lx, legendY + 6, 12, betweenColor, fc, 2);
-  plainText(ctx, `Between Lines (${betweenCount})`, lx + 24, legendY - 8, fc, 26);
-  lx += ctx.measureText(`Between Lines (${betweenCount})`).width + 70;
+  plainText(ctx, `Platform (${betweenCount})`, lx + 24, legendY - 8, fc, 26);
+  lx += ctx.measureText(`Platform (${betweenCount})`).width + 70;
 
-  // "In Behind" legend
+  // "AAA" legend
   filledCircle(ctx, lx, legendY + 6, 12, behindColor, fc, 2);
-  plainText(ctx, `In Behind (${behindCount})`, lx + 24, legendY - 8, fc, 26);
-  lx += ctx.measureText(`In Behind (${behindCount})`).width + 70;
+  plainText(ctx, `AAA (${behindCount})`, lx + 24, legendY - 8, fc, 26);
+  lx += ctx.measureText(`AAA (${behindCount})`).width + 70;
 
   // Receiver legend
   diamond(ctx, lx, legendY + 6, 10, tc, fc, 2);
@@ -711,8 +709,8 @@ export function renderPlayupMap(
   const statsY = pitchRect.y + pitchRect.h + 50;
   const stats = [
     ['Playups', String(totalPlayups)],
-    ['Between Lines', String(betweenCount)],
-    ['In Behind', String(behindCount)],
+    ['Platform', String(betweenCount)],
+    ['AAA', String(behindCount)],
     ['Passers', String(uniquePassers)],
     ['Receivers', String(uniqueReceivers)],
   ];

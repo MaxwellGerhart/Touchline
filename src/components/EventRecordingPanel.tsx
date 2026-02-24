@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, X, Edit2, Check, Eye, UserPlus, Target, ZoomIn, ZoomOut } from 'lucide-react';
+import { Plus, X, Edit2, Check, Eye, UserPlus } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
-import { useDrill } from '../context/DrillContext';
-import { useSession } from '../context/SessionContext';
 import { useTimer } from '../context/TimerContext';
-import { TeamId, Player, RosterPlayer, distanceToGoal } from '../types';
+import { TeamId, Player, RosterPlayer } from '../types';
 
 export function EventRecordingPanel() {
   const {
@@ -37,8 +35,6 @@ export function EventRecordingPanel() {
     addRosterPlayerToTeam,
   } = useEvents();
 
-  const { isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive, setIsDrillActive, setDrawingForNewSession } = useDrill();
-  const { activeSession, updateSession } = useSession();
   const { matchMinute, status: timerStatus } = useTimer();
 
   // Use match-timer elapsed seconds when the timer has been used, otherwise fall back to video time
@@ -131,7 +127,7 @@ export function EventRecordingPanel() {
     }
   };
 
-  const isPlayup = selectedEventType === 'Playup';
+  const isPlayup = selectedEventType === 'Playup Platform' || selectedEventType === 'Playup AAA';
 
   const canRecord = isPlayup
     ? selectedPlayer !== null && selectedTeam !== null && playupReceiver !== null && playupReceiverTeam !== null && startLocation !== null && endLocation !== null
@@ -145,36 +141,21 @@ export function EventRecordingPanel() {
       const passer = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
       const receiver = players.find(p => p.id === playupReceiver && p.team === playupReceiverTeam);
       if (!passer || !receiver) return;
-      addPlayupEvent(passer, receiver, startLocation, endLocation, effectiveTime);
+      addPlayupEvent(passer, receiver, startLocation, endLocation, effectiveTime, selectedEventType);
     } else {
       if (selectedPlayer === null || selectedTeam === null || selectedEventType === null || startLocation === null) return;
       const player = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
       if (!player) return;
 
-      // Apply distance-to-goal X-shift based on which goal this player's team attacks
-      const drillArea = activeSession?.area ?? null;
-      const teamGoal = activeSession
-        ? (selectedTeam === 1 ? activeSession.team1Goal : activeSession.team2Goal)
-        : null;
-
-      let finalStart = startLocation;
-      let finalEnd = endLocation || undefined;
-
-      if (drillArea && teamGoal) {
-        finalStart = distanceToGoal(startLocation, drillArea, teamGoal);
-        finalEnd = endLocation ? distanceToGoal(endLocation, drillArea, teamGoal) : undefined;
-      }
-
+      // Session feature disabled: just record event with basic info
       addEvent({
         videoTimestamp: effectiveTime,
         playerId: selectedPlayer,
         playerName: player.name,
         playerTeam: selectedTeam,
         eventType: selectedEventType,
-        startLocation: finalStart,
-        endLocation: finalEnd,
-        drillType: activeSession?.drillType || undefined,
-        sessionId: activeSession?.id,
+        startLocation,
+        endLocation: endLocation || undefined,
       });
     }
 
@@ -265,130 +246,40 @@ export function EventRecordingPanel() {
             {playerDisplayMode === 'number' ? '#' : playerDisplayMode === 'name' ? 'Aa' : '# Aa'}
           </button>
         </div>
-        <div className="flex flex-col gap-1">
-          {/* Team 1 Row */}
-          <div className="flex items-center gap-1">
-            {/* Team 1 Button */}
-            {editingTeam === 1 ? (
-              <div className="flex items-center gap-1">
-                <input
-                  type="text"
-                  value={editTeamName}
-                  onChange={(e) => setEditTeamName(e.target.value)}
-                  onKeyDown={handleTeamNameKeyDown}
-                  className="px-2 py-1 rounded text-xs w-20 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
-                  autoFocus
-                />
-                <button
-                  onClick={handleSaveTeamName}
-                  className="p-1 rounded bg-green-500 text-white hover:bg-green-600"
-                >
-                  <Check className="w-3 h-3" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => handleEditTeamName(1)}
-                className="p-1.5 rounded text-sm font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 flex items-center gap-1 min-w-[70px] justify-center"
-                title="Click to edit team name"
-              >
-                {teamNames.team1}
-                <Edit2 className="w-3 h-3 opacity-50" />
-              </button>
-            )}
-            {/* Team 1 Players */}
-            {team1Players.map((player) => (
-              <div key={`team1-${player.id}`} className="relative group">
-                <button
-                  onClick={() => handlePlayerClick(player.id, 1)}
-                  className={`
-                    p-1.5 rounded text-center transition-all duration-200 text-sm font-bold
-                    ${getPlayerButtonStyle(player.id, 1)}
-                  `}
-                  title={`${player.name}${isPlayup && selectedPlayer === player.id && selectedTeam === 1 ? ' (Passer)' : ''}${isPlayup && playupReceiver === player.id && playupReceiverTeam === 1 ? ' (Receiver)' : ''}`}
-                >
-                  {getPlayerLabel(player)}
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removePlayer(player.id, 1);
-                  }}
-                  className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-500 text-white hidden group-hover:flex items-center justify-center text-xs"
-                  title="Remove player"
-                >
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              </div>
-            ))}
-            {showAddPlayerInputTeam1 ? (
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  value={newPlayerNumber}
-                  onChange={(e) => setNewPlayerNumber(e.target.value)}
-                  onKeyDown={(e) => handlePlayerKeyDown(e, 1)}
-                  placeholder="#"
-                  className="px-2 py-1 rounded text-xs w-12 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
-                  autoFocus
-                />
-                <input
-                  type="text"
-                  value={newPlayerName}
-                  onChange={(e) => setNewPlayerName(e.target.value)}
-                  onKeyDown={(e) => handlePlayerKeyDown(e, 1)}
-                  placeholder="Name"
-                  className="px-2 py-1 rounded text-xs w-20 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
-                />
-                <button
-                  onClick={() => handleAddPlayer(1)}
-                  className="p-1 rounded bg-green-500 text-white hover:bg-green-600"
-                >
-                  <Plus className="w-3 h-3" />
-                </button>
-                <button
-                  onClick={() => { setNewPlayerNumber(''); setNewPlayerName(''); setShowAddPlayerInputTeam1(false); }}
-                  className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ) : showRosterPickerTeam1 && activeRoster ? (
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-1">
+        <div className="max-h-40 overflow-y-auto flex flex-col gap-2">
+          {/* Team 1 Grid Row */}
+          <div className="flex gap-2 items-start">
+            {/* Team 1 Label/Controls */}
+            <div className="flex flex-col items-start min-w-[80px] mr-1">
+              {editingTeam === 1 ? (
+                <div className="flex items-center gap-1 mb-1">
                   <input
                     type="text"
-                    value={rosterSearch}
-                    onChange={(e) => setRosterSearch(e.target.value)}
-                    placeholder="Search roster..."
-                    className="px-2 py-1 rounded text-xs w-28 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                    value={editTeamName}
+                    onChange={(e) => setEditTeamName(e.target.value)}
+                    onKeyDown={handleTeamNameKeyDown}
+                    className="px-2 py-1 rounded text-xs w-20 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
                     autoFocus
                   />
                   <button
-                    onClick={() => { setShowRosterPickerTeam1(false); setRosterSearch(''); }}
-                    className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
+                    onClick={handleSaveTeamName}
+                    className="p-1 rounded bg-green-500 text-white hover:bg-green-600"
                   >
-                    <X className="w-3 h-3" />
+                    <Check className="w-3 h-3" />
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-1 max-h-24 overflow-auto">
-                  {filteredRosterPlayers(1).map((rp) => (
-                    <button
-                      key={rp.id}
-                      onClick={() => { handleAddFromRoster(rp, 1); }}
-                      className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800"
-                      title={`${rp.number} - ${rp.name}`}
-                    >
-                      #{rp.number} {rp.name}
-                    </button>
-                  ))}
-                  {filteredRosterPlayers(1).length === 0 && (
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400 py-1">No available players</span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1">
+              ) : (
+                <button
+                  onClick={() => handleEditTeamName(1)}
+                  className="p-1.5 rounded text-sm font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 flex items-center gap-1 min-w-[70px] justify-center mb-1 border-l-4 border-blue-400 dark:border-blue-700 pl-2"
+                  title="Click to edit team name"
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  {teamNames.team1}
+                  <Edit2 className="w-3 h-3 opacity-50" />
+                </button>
+              )}
+              <div className="flex gap-1">
                 {activeRoster && (
                   <button
                     onClick={() => { setShowRosterPickerTeam1(true); setRosterSearch(''); }}
@@ -406,132 +297,138 @@ export function EventRecordingPanel() {
                   <Plus className="w-3 h-3" />
                 </button>
               </div>
-            )}
-          </div>
-
-          {/* Team 2 Row */}
-          <div className="flex items-center gap-1">
-            {/* Team 2 Button */}
-            {editingTeam === 2 ? (
-              <div className="flex items-center gap-1">
-                <input
-                  type="text"
-                  value={editTeamName}
-                  onChange={(e) => setEditTeamName(e.target.value)}
-                  onKeyDown={handleTeamNameKeyDown}
-                  className="px-2 py-1 rounded text-xs w-20 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
-                  autoFocus
-                />
-                <button
-                  onClick={handleSaveTeamName}
-                  className="p-1 rounded bg-green-500 text-white hover:bg-green-600"
-                >
-                  <Check className="w-3 h-3" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => handleEditTeamName(2)}
-                className="p-1.5 rounded text-sm font-bold bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-800 flex items-center gap-1 min-w-[70px] justify-center"
-                title="Click to edit team name"
-              >
-                {teamNames.team2}
-                <Edit2 className="w-3 h-3 opacity-50" />
-              </button>
-            )}
-            {/* Team 2 Players */}
-            {team2Players.map((player) => (
-              <div key={`team2-${player.id}`} className="relative group">
-                <button
-                  onClick={() => handlePlayerClick(player.id, 2)}
-                  className={`
-                    p-1.5 rounded text-center transition-all duration-200 text-sm font-bold
-                    ${getPlayerButtonStyle(player.id, 2)}
-                  `}
-                  title={`${player.name}${isPlayup && selectedPlayer === player.id && selectedTeam === 2 ? ' (Passer)' : ''}${isPlayup && playupReceiver === player.id && playupReceiverTeam === 2 ? ' (Receiver)' : ''}`}
-                >
-                  {getPlayerLabel(player)}
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removePlayer(player.id, 2);
-                  }}
-                  className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-500 text-white hidden group-hover:flex items-center justify-center text-xs"
-                  title="Remove player"
-                >
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              </div>
-            ))}
-            {showAddPlayerInputTeam2 ? (
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  value={newPlayerNumber}
-                  onChange={(e) => setNewPlayerNumber(e.target.value)}
-                  onKeyDown={(e) => handlePlayerKeyDown(e, 2)}
-                  placeholder="#"
-                  className="px-2 py-1 rounded text-xs w-12 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
-                  autoFocus
-                />
-                <input
-                  type="text"
-                  value={newPlayerName}
-                  onChange={(e) => setNewPlayerName(e.target.value)}
-                  onKeyDown={(e) => handlePlayerKeyDown(e, 2)}
-                  placeholder="Name"
-                  className="px-2 py-1 rounded text-xs w-20 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
-                />
-                <button
-                  onClick={() => handleAddPlayer(2)}
-                  className="p-1 rounded bg-green-500 text-white hover:bg-green-600"
-                >
-                  <Plus className="w-3 h-3" />
-                </button>
-                <button
-                  onClick={() => { setNewPlayerNumber(''); setNewPlayerName(''); setShowAddPlayerInputTeam2(false); }}
-                  className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ) : showRosterPickerTeam2 && activeRoster ? (
-              <div className="flex flex-col gap-1">
+            </div>
+            {/* Team 1 Players Grid */}
+            <div className="flex flex-wrap gap-1 flex-1 items-start">
+              {team1Players.map((player) => (
+                <div key={`team1-${player.id}`} className="relative group">
+                  <button
+                    onClick={() => handlePlayerClick(player.id, 1)}
+                    className={`
+                      ${playerDisplayMode === 'number' ? 'w-9 h-9 text-xs p-0' : 'min-w-[2.5rem] h-9 text-xs px-2 py-1'}
+                      rounded text-center transition-all duration-200 font-bold
+                      ${getPlayerButtonStyle(player.id, 1)}
+                    `}
+                    title={`${player.name}${isPlayup && selectedPlayer === player.id && selectedTeam === 1 ? ' (Passer)' : ''}${isPlayup && playupReceiver === player.id && playupReceiverTeam === 1 ? ' (Receiver)' : ''}`}
+                  >
+                    {getPlayerLabel(player)}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removePlayer(player.id, 1);
+                    }}
+                    className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-500 text-white hidden group-hover:flex items-center justify-center text-xs"
+                    title="Remove player"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+              {showAddPlayerInputTeam1 && (
                 <div className="flex items-center gap-1">
                   <input
-                    type="text"
-                    value={rosterSearch}
-                    onChange={(e) => setRosterSearch(e.target.value)}
-                    placeholder="Search roster..."
-                    className="px-2 py-1 rounded text-xs w-28 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                    type="number"
+                    value={newPlayerNumber}
+                    onChange={(e) => setNewPlayerNumber(e.target.value)}
+                    onKeyDown={(e) => handlePlayerKeyDown(e, 1)}
+                    placeholder="#"
+                    className="px-2 py-1 rounded text-xs w-12 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
                     autoFocus
                   />
+                  <input
+                    type="text"
+                    value={newPlayerName}
+                    onChange={(e) => setNewPlayerName(e.target.value)}
+                    onKeyDown={(e) => handlePlayerKeyDown(e, 1)}
+                    placeholder="Name"
+                    className="px-2 py-1 rounded text-xs w-20 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                  />
                   <button
-                    onClick={() => { setShowRosterPickerTeam2(false); setRosterSearch(''); }}
+                    onClick={() => handleAddPlayer(1)}
+                    className="p-1 rounded bg-green-500 text-white hover:bg-green-600"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => { setNewPlayerNumber(''); setNewPlayerName(''); setShowAddPlayerInputTeam1(false); }}
                     className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
                   >
                     <X className="w-3 h-3" />
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-1 max-h-24 overflow-auto">
-                  {filteredRosterPlayers(2).map((rp) => (
-                    <button
-                      key={rp.id}
-                      onClick={() => { handleAddFromRoster(rp, 2); }}
-                      className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-800"
-                      title={`${rp.number} - ${rp.name}`}
-                    >
-                      #{rp.number} {rp.name}
-                    </button>
-                  ))}
-                  {filteredRosterPlayers(2).length === 0 && (
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400 py-1">No available players</span>
-                  )}
-                </div>
+              )}
+            </div>
+          </div>
+          {/* Team 1 Roster Picker (below grid) */}
+          {showRosterPickerTeam1 && activeRoster && (
+            <div className="w-full mt-1 bg-blue-50 dark:bg-blue-950 rounded p-2 border border-blue-200 dark:border-blue-800">
+              <div className="flex items-center gap-1 mb-1">
+                <input
+                  type="text"
+                  value={rosterSearch}
+                  onChange={(e) => setRosterSearch(e.target.value)}
+                  placeholder="Search roster..."
+                  className="px-2 py-1 rounded text-xs w-28 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                  autoFocus
+                />
+                <button
+                  onClick={() => { setShowRosterPickerTeam1(false); setRosterSearch(''); }}
+                  className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
+                >
+                  <X className="w-3 h-3" />
+                </button>
               </div>
-            ) : (
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap gap-1 max-h-24 overflow-auto">
+                {filteredRosterPlayers(1).map((rp) => (
+                  <button
+                    key={rp.id}
+                    onClick={() => { handleAddFromRoster(rp, 1); }}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800"
+                    title={`${rp.number} - ${rp.name}`}
+                  >
+                    #{rp.number} {rp.name}
+                  </button>
+                ))}
+                {filteredRosterPlayers(1).length === 0 && (
+                  <span className="text-[10px] text-gray-500 dark:text-gray-400 py-1">No available players</span>
+                )}
+              </div>
+            </div>
+          )}
+          {/* Team 2 Grid Row */}
+          <div className="flex gap-2 items-start mt-2">
+            {/* Team 2 Label/Controls */}
+            <div className="flex flex-col items-start min-w-[80px] mr-1">
+              {editingTeam === 2 ? (
+                <div className="flex items-center gap-1 mb-1">
+                  <input
+                    type="text"
+                    value={editTeamName}
+                    onChange={(e) => setEditTeamName(e.target.value)}
+                    onKeyDown={handleTeamNameKeyDown}
+                    className="px-2 py-1 rounded text-xs w-20 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSaveTeamName}
+                    className="p-1 rounded bg-green-500 text-white hover:bg-green-600"
+                  >
+                    <Check className="w-3 h-3" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleEditTeamName(2)}
+                  className="p-1.5 rounded text-sm font-bold bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-800 flex items-center gap-1 min-w-[70px] justify-center mb-1 border-l-4 border-orange-400 dark:border-orange-700 pl-2"
+                  title="Click to edit team name"
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  {teamNames.team2}
+                  <Edit2 className="w-3 h-3 opacity-50" />
+                </button>
+              )}
+              <div className="flex gap-1">
                 {activeRoster && (
                   <button
                     onClick={() => { setShowRosterPickerTeam2(true); setRosterSearch(''); }}
@@ -549,8 +446,105 @@ export function EventRecordingPanel() {
                   <Plus className="w-3 h-3" />
                 </button>
               </div>
-            )}
+            </div>
+            {/* Team 2 Players Grid */}
+            <div className="flex flex-wrap gap-1 flex-1 items-start">
+              {team2Players.map((player) => (
+                <div key={`team2-${player.id}`} className="relative group">
+                  <button
+                    onClick={() => handlePlayerClick(player.id, 2)}
+                    className={`
+                      ${playerDisplayMode === 'number' ? 'w-9 h-9 text-xs p-0' : 'min-w-[2.5rem] h-9 text-xs px-2 py-1'}
+                      rounded text-center transition-all duration-200 font-bold
+                      ${getPlayerButtonStyle(player.id, 2)}
+                    `}
+                    title={`${player.name}${isPlayup && selectedPlayer === player.id && selectedTeam === 2 ? ' (Passer)' : ''}${isPlayup && playupReceiver === player.id && playupReceiverTeam === 2 ? ' (Receiver)' : ''}`}
+                  >
+                    {getPlayerLabel(player)}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removePlayer(player.id, 2);
+                    }}
+                    className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-500 text-white hidden group-hover:flex items-center justify-center text-xs"
+                    title="Remove player"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+              {showAddPlayerInputTeam2 && (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    value={newPlayerNumber}
+                    onChange={(e) => setNewPlayerNumber(e.target.value)}
+                    onKeyDown={(e) => handlePlayerKeyDown(e, 2)}
+                    placeholder="#"
+                    className="px-2 py-1 rounded text-xs w-12 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                    autoFocus
+                  />
+                  <input
+                    type="text"
+                    value={newPlayerName}
+                    onChange={(e) => setNewPlayerName(e.target.value)}
+                    onKeyDown={(e) => handlePlayerKeyDown(e, 2)}
+                    placeholder="Name"
+                    className="px-2 py-1 rounded text-xs w-20 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                  />
+                  <button
+                    onClick={() => handleAddPlayer(2)}
+                    className="p-1 rounded bg-green-500 text-white hover:bg-green-600"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => { setNewPlayerNumber(''); setNewPlayerName(''); setShowAddPlayerInputTeam2(false); }}
+                    className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
+          {/* Team 2 Roster Picker (below grid) */}
+          {showRosterPickerTeam2 && activeRoster && (
+            <div className="w-full mt-1 bg-orange-50 dark:bg-orange-950 rounded p-2 border border-orange-200 dark:border-orange-800">
+              <div className="flex items-center gap-1 mb-1">
+                <input
+                  type="text"
+                  value={rosterSearch}
+                  onChange={(e) => setRosterSearch(e.target.value)}
+                  placeholder="Search roster..."
+                  className="px-2 py-1 rounded text-xs w-28 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-navy dark:focus:ring-rose"
+                  autoFocus
+                />
+                <button
+                  onClick={() => { setShowRosterPickerTeam2(false); setRosterSearch(''); }}
+                  className="p-1 rounded bg-gray-400 text-white hover:bg-gray-500"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1 max-h-24 overflow-auto">
+                {filteredRosterPlayers(2).map((rp) => (
+                  <button
+                    key={rp.id}
+                    onClick={() => { handleAddFromRoster(rp, 2); }}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-800"
+                    title={`${rp.number} - ${rp.name}`}
+                  >
+                    #{rp.number} {rp.name}
+                  </button>
+                ))}
+                {filteredRosterPlayers(2).length === 0 && (
+                  <span className="text-[10px] text-gray-500 dark:text-gray-400 py-1">No available players</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -619,74 +613,8 @@ export function EventRecordingPanel() {
         </div>
       </div>
 
-      {/* Session & Drill Area */}
-      <div>
-        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-          <Target className="w-3 h-3 inline mr-1" />
-          Session
-          {activeSession && (
-            <span className="ml-1.5 text-[10px] font-normal text-orange-600 dark:text-orange-400">
-              {activeSession.name} • T1→{activeSession.team1Goal} T2→{activeSession.team2Goal}
-            </span>
-          )}
-        </label>
-        {!activeSession ? (
-          <p className="text-xs text-gray-500 dark:text-gray-400 italic">No active session. Create one to configure a drill area.</p>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            <input
-              type="text"
-              value={activeSession.drillType}
-              onChange={(e) => updateSession(activeSession.id, { drillType: e.target.value })}
-              placeholder="Drill type (e.g. Half-field 6v6)"
-              className="px-2 py-1 rounded text-xs w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-1 focus:ring-orange-400 dark:focus:ring-orange-500"
-            />
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => {
-                  setDrawingForNewSession(false);
-                  setIsDrawingDrillArea(!isDrawingDrillArea);
-                }}
-                className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
-                  isDrawingDrillArea
-                    ? 'bg-orange-500 text-white ring-1 ring-orange-500'
-                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                }`}
-                title={isDrawingDrillArea ? 'Cancel drawing' : 'Draw drill area on pitch'}
-              >
-                <Target className="w-3 h-3" />
-                {isDrawingDrillArea ? 'Drawing...' : activeSession.area ? 'Re-draw' : 'Draw Area'}
-              </button>
-              {activeSession.area && (
-                <>
-                  <button
-                    onClick={() => setIsDrillActive(!isDrillActive)}
-                    className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors ${
-                      isDrillActive
-                        ? 'bg-green-600 text-white ring-1 ring-green-600'
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                    }`}
-                    title={isDrillActive ? 'Deactivate drill (return to full field)' : 'Activate drill (zoom into area)'}
-                  >
-                    {isDrillActive ? <ZoomOut className="w-3 h-3" /> : <ZoomIn className="w-3 h-3" />}
-                    {isDrillActive ? 'Active' : 'Activate'}
-                  </button>
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                    {activeSession.area.width.toFixed(0)}% x {activeSession.area.height.toFixed(0)}%
-                  </span>
-                  <button
-                    onClick={() => { updateSession(activeSession.id, { area: null }); setIsDrillActive(false); }}
-                    className="p-1 rounded text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30"
-                    title="Remove drill area"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Session & Drill Area hidden - preserved for future use */}
+      {/* <div> ...existing session & drill area controls... </div> */}
 
       {/* Status and Record Button */}
       <div className="flex-1 flex items-end justify-end">

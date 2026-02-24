@@ -5,7 +5,8 @@ import { useDrill } from '../context/DrillContext';
 import { useEvents } from '../context/EventContext';
 import { GoalEnd } from '../types';
 
-export function SessionSetupModal() {
+// SessionSetupModal preserved for future use
+// export function SessionSetupModal() {
   const { isSetupOpen, closeSetup, openSetup, createSession, sessions, activeSession } = useSession();
   const { isDrawingDrillArea, setIsDrawingDrillArea, pendingArea, setPendingArea, setDrawingForNewSession, setIsDrillActive } = useDrill();
   const { teamNames } = useEvents();

@@ -6,7 +6,7 @@ import { parseCSV, mergeEvents, findNewPlayers } from '../utils/importCsv';
 interface EventContextType {
   events: MatchEvent[];
   addEvent: (event: Omit<MatchEvent, 'id' | 'createdAt'>) => void;
-  addPlayupEvent: (passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number) => void;
+  addPlayupEvent: (passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number, playupType: string) => void;
   deleteEvent: (id: string) => void;
   updateEventTime: (id: string, newTimestamp: number) => void;
   clearEvents: () => void;
@@ -71,7 +71,9 @@ const ACTIVE_ROSTER_STORAGE_KEY = 'touchline_active_roster';
 export function EventProvider({ children }: { children: ReactNode }) {
   const [events, setEvents] = useState<MatchEvent[]>(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
+    const raw: MatchEvent[] = stored ? JSON.parse(stored) : [];
+    // Migration shim: treat legacy 'Playup' events as 'Playup Platform'
+    return raw.map(e => e.eventType === 'Playup' ? { ...e, eventType: 'Playup Platform' } : e);
   });
 
   const [players, setPlayers] = useState<Player[]>(() => {
@@ -240,7 +242,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
     setEvents(prev => [...prev, newEvent].sort((a, b) => a.videoTimestamp - b.videoTimestamp));
   }, []);
 
-  const addPlayupEvent = useCallback((passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number) => {
+  const addPlayupEvent = useCallback((passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number, playupType: string) => {
     const now = new Date().toISOString();
     const passEvent: MatchEvent = {
       id: uuidv4(),
@@ -248,7 +250,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
       playerId: passer.id,
       playerName: passer.name,
       playerTeam: passer.team,
-      eventType: 'Playup',
+      eventType: playupType,
       startLocation: startLoc,
       endLocation: endLoc,
       createdAt: now,
@@ -288,7 +290,9 @@ export function EventProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const restoreEvents = useCallback((snapshot: MatchEvent[]) => {
-    setEvents(snapshot.sort((a, b) => a.videoTimestamp - b.videoTimestamp));
+    // Migration shim: treat legacy 'Playup' events as 'Playup Platform'
+    const migrated = snapshot.map(e => e.eventType === 'Playup' ? { ...e, eventType: 'Playup Platform' } : e);
+    setEvents(migrated.sort((a, b) => a.videoTimestamp - b.videoTimestamp));
   }, []);
 
   const updatePlayerName = useCallback((id: number, name: string, team: TeamId) => {
@@ -334,12 +338,15 @@ export function EventProvider({ children }: { children: ReactNode }) {
       return { added: 0, skipped: 0, error: 'No events found in the CSV file.' };
     }
 
+    // Migration shim: treat legacy 'Playup' events as 'Playup Platform'
+    const migratedEvents = parsed.events.map(e => e.eventType === 'Playup' ? { ...e, eventType: 'Playup Platform' } : e);
+
     // Merge events
-    const { merged, added, skipped } = mergeEvents(events, parsed.events);
+    const { merged, added, skipped } = mergeEvents(events, migratedEvents);
     setEvents(merged.sort((a, b) => a.videoTimestamp - b.videoTimestamp));
 
     // Add new players from the other team(s) to the roster
-    const newPlayers = findNewPlayers(parsed.events, players);
+    const newPlayers = findNewPlayers(migratedEvents, players);
     if (newPlayers.length > 0) {
       setPlayers((prev: Player[]) => {
         const updated = [...prev];
@@ -353,7 +360,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
     }
 
     // Ensure any new event types are registered
-    const importedTypes = new Set(parsed.events.map(e => e.eventType));
+    const importedTypes = new Set(migratedEvents.map(e => e.eventType));
     setEventTypes((prev: string[]) => {
       const newTypes = [...importedTypes].filter(t => !prev.includes(t));
       return newTypes.length > 0 ? [...prev, ...newTypes] : prev;

@@ -81,7 +81,8 @@ export const DEFAULT_EVENT_TYPES: string[] = [
   'Foul',
   'Save',
   'Goal',
-  'Playup',
+  'Playup Platform',
+  'Playup AAA',
 ];
 
   // Roster management
