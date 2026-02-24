@@ -239,4 +239,4 @@ import { GoalEnd } from '../types';
       </div>
     </div>
   );
-}
+// ...existing code...
