@@ -6,7 +6,7 @@ import { useEvents } from '../context/EventContext';
 import { GoalEnd } from '../types';
 
 // SessionSetupModal preserved for future use
-// export function SessionSetupModal() {
+export function SessionSetupModal() {
   const { isSetupOpen, closeSetup, openSetup, createSession, sessions, activeSession } = useSession();
   const { isDrawingDrillArea, setIsDrawingDrillArea, pendingArea, setPendingArea, setDrawingForNewSession, setIsDrillActive } = useDrill();
   const { teamNames } = useEvents();
@@ -239,4 +239,5 @@ import { GoalEnd } from '../types';
       </div>
     </div>
   );
+}
 // ...existing code...
