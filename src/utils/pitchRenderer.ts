@@ -1456,3 +1456,257 @@ function drawStar(
   ctx.fillStyle = color;
   ctx.fill();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Match Report renderer
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const REPORT_CANVAS_W = 2200;
+export const REPORT_CANVAS_H = 1800;
+
+export interface MatchReportOptions {
+  team1Name: string;
+  team2Name: string;
+  team1Color: string;
+  team2Color: string;
+  subtitle?: string;
+}
+
+/**
+ * Render a full-session match report that auto-adapts to whatever event types
+ * are present.  Draws a team-vs-team comparison bar + a horizontal bar chart
+ * of every event type, plus a top-performers table.
+ */
+export function renderMatchReport(
+  canvas: HTMLCanvasElement,
+  events: GraphicEvent[],
+  options: MatchReportOptions,
+): void {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const W = REPORT_CANVAS_W;
+
+  // ── Pre-scan data to compute dynamic height ─────────────────────────
+  const eventTypeSet = new Set<string>();
+  events.forEach(e => eventTypeSet.add(e.eventType));
+  const eventTypes = [...eventTypeSet].sort();
+
+  const playerKeys = new Set<string>();
+  events.forEach(e => playerKeys.add(`${e.playerName}__${e.playerTeam}`));
+  const playerRows = Math.min(playerKeys.size, 10);
+
+  const barRowH = 52;
+  const rowHeight = 42;
+  // header(150) + banners(100) + bars section heading(46) + bars + gap(30)
+  // + table heading(44) + header row + data rows + footer(60)
+  const H = Math.max(REPORT_CANVAS_H,
+    155 + 64 + 36 + 46 + eventTypes.length * barRowH + 30 + 44 + (playerRows + 1) * rowHeight + 80);
+
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+
+  const bg = SHOT_BG;
+  const fc = SHOT_TEXT;
+  const grey = SHOT_GREY;
+  const c1 = options.team1Color || '#001E44';
+  const c2 = options.team2Color || '#C41E3A';
+
+  // ── Background ──────────────────────────────────────────────────────
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── (event types already gathered above) ────────────────────────────
+
+  // ── Count events per team per type ──────────────────────────────────
+  const team1Events = events.filter(e => String(e.playerTeam) === '1');
+  const team2Events = events.filter(e => String(e.playerTeam) === '2');
+
+  const counts1: Record<string, number> = {};
+  const counts2: Record<string, number> = {};
+  eventTypes.forEach(t => { counts1[t] = 0; counts2[t] = 0; });
+  team1Events.forEach(e => { counts1[e.eventType] = (counts1[e.eventType] || 0) + 1; });
+  team2Events.forEach(e => { counts2[e.eventType] = (counts2[e.eventType] || 0) + 1; });
+
+  const total1 = team1Events.length;
+  const total2 = team2Events.length;
+
+  // ── Header ──────────────────────────────────────────────────────────
+  const titleY = 50;
+  plainText(ctx, 'MATCH REPORT', W / 2, titleY, fc, 56, { weight: 'bold', align: 'center' });
+  if (options.subtitle) {
+    plainText(ctx, options.subtitle, W / 2, titleY + 68, grey, 32, { align: 'center' });
+  }
+
+  // ── Team banners ────────────────────────────────────────────────────
+  const bannerY = 155;
+  const bannerH = 64;
+
+  // Team 1 left banner
+  ctx.fillStyle = c1;
+  roundRect(ctx, 60, bannerY, W / 2 - 90, bannerH, 10);
+  ctx.fill();
+  plainText(ctx, options.team1Name, 80, bannerY + 14, '#FFFFFF', 32, { weight: 'bold' });
+  plainText(ctx, `${total1} events`, W / 2 - 60, bannerY + 18, '#FFFFFF', 24, { align: 'right' });
+
+  // Team 2 right banner
+  ctx.fillStyle = c2;
+  roundRect(ctx, W / 2 + 30, bannerY, W / 2 - 90, bannerH, 10);
+  ctx.fill();
+  plainText(ctx, options.team2Name, W / 2 + 50, bannerY + 14, '#FFFFFF', 32, { weight: 'bold' });
+  plainText(ctx, `${total2} events`, W - 80, bannerY + 18, '#FFFFFF', 24, { align: 'right' });
+
+  // ── Comparison bars section ─────────────────────────────────────────
+  const barSectionY = bannerY + bannerH + 36;
+  const barInnerPad = 6;
+  const barLabelGap = 140;       // gap between center labels and bar start
+  const barNumGap = 36;          // gap between bar end and number
+  const maxBarW = (W / 2 - barLabelGap - barNumGap - 60);  // leave room for numbers
+  const centerX = W / 2;
+
+  // Section heading
+  plainText(ctx, 'STATS BREAKDOWN', centerX, barSectionY, fc, 30, { weight: 'bold', align: 'center' });
+
+  const barStartY = barSectionY + 46;
+
+  // Draw comparison bars for each event type
+  eventTypes.forEach((evType, i) => {
+    const rowY = barStartY + i * barRowH;
+    const v1 = counts1[evType] || 0;
+    const v2 = counts2[evType] || 0;
+    const rowMax = Math.max(v1, v2, 1);
+
+    // Label (center)
+    plainText(ctx, evType, centerX, rowY + 4, fc, 22, { weight: '600', align: 'center' });
+
+    // Team 1 bar (grows left from center)
+    const bw1 = (v1 / rowMax) * maxBarW;
+    const barH = barRowH - barInnerPad * 2 - 20;
+
+    ctx.fillStyle = c1;
+    roundRect(ctx, centerX - barLabelGap - bw1, rowY + 26, bw1, barH, 5);
+    ctx.fill();
+    if (v1 > 0) {
+      plainText(ctx, String(v1), centerX - barLabelGap - bw1 - 12, rowY + 26, fc, 20, { weight: 'bold', align: 'right' });
+    }
+
+    // Team 2 bar (grows right from center)
+    const bw2 = (v2 / rowMax) * maxBarW;
+    ctx.fillStyle = c2;
+    roundRect(ctx, centerX + barLabelGap, rowY + 26, bw2, barH, 5);
+    ctx.fill();
+    if (v2 > 0) {
+      plainText(ctx, String(v2), centerX + barLabelGap + bw2 + 12, rowY + 26, fc, 20, { weight: 'bold' });
+    }
+  });
+
+  // ── Top performers table ────────────────────────────────────────────
+  const tableY = barStartY + eventTypes.length * barRowH + 30;
+
+  // Compute per-player totals
+  const playerTotals: Record<string, { team: string | number; count: number; breakdown: Record<string, number> }> = {};
+  events.forEach(e => {
+    const key = `${e.playerName}__${e.playerTeam}`;
+    if (!playerTotals[key]) {
+      playerTotals[key] = { team: e.playerTeam, count: 0, breakdown: {} };
+    }
+    playerTotals[key].count += 1;
+    playerTotals[key].breakdown[e.eventType] = (playerTotals[key].breakdown[e.eventType] || 0) + 1;
+  });
+
+  const sortedPlayers = Object.entries(playerTotals)
+    .sort(([, a], [, b]) => b.count - a.count)
+    .slice(0, 10);
+
+  // Pick top 4 most common event types as detail columns
+  const typeFreq: Record<string, number> = {};
+  events.forEach(e => { typeFreq[e.eventType] = (typeFreq[e.eventType] || 0) + 1; });
+  const detailCols = Object.entries(typeFreq)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 4)
+    .map(([t]) => t);
+
+  // Section heading
+  plainText(ctx, 'TOP PERFORMERS', centerX, tableY, fc, 30, { weight: 'bold', align: 'center' });
+
+  // Table header
+  const tblY = tableY + 44;
+  const tblX = 80;
+  const tblW = W - tblX * 2;
+  const nameColW = 360;
+  const teamColW = 200;
+  const totalColW = 120;
+  const fixedW = nameColW + teamColW + totalColW;
+  const detColW = detailCols.length > 0 ? Math.floor((tblW - fixedW - 32) / detailCols.length) : 160;
+
+  // Header row background
+  ctx.fillStyle = '#DDDDDD';
+  roundRect(ctx, tblX, tblY, W - tblX * 2, rowHeight, 6);
+  ctx.fill();
+
+  let colX = tblX + 16;
+  plainText(ctx, 'Player', colX, tblY + 10, fc, 22, { weight: 'bold' });
+  colX += nameColW;
+  plainText(ctx, 'Team', colX, tblY + 10, fc, 22, { weight: 'bold' });
+  colX += teamColW;
+  plainText(ctx, 'Total', colX, tblY + 10, fc, 22, { weight: 'bold' });
+  colX += totalColW;
+  detailCols.forEach(dc => {
+    plainText(ctx, dc, colX, tblY + 10, fc, 22, { weight: 'bold' });
+    colX += detColW;
+  });
+
+  // Data rows
+  sortedPlayers.forEach(([key, data], idx) => {
+    const playerName = key.split('__')[0];
+    const isTeam1 = String(data.team) === '1';
+    const rowY2 = tblY + rowHeight + idx * rowHeight;
+
+    // Alternating row background
+    if (idx % 2 === 0) {
+      ctx.fillStyle = '#E8E8E8';
+      ctx.fillRect(tblX, rowY2, W - tblX * 2, rowHeight);
+    }
+
+    // Team color indicator dot
+    filledCircle(ctx, tblX + 8, rowY2 + rowHeight / 2, 6, isTeam1 ? c1 : c2);
+
+    let cx = tblX + 16;
+    plainText(ctx, playerName || '–', cx, rowY2 + 10, fc, 20);
+    cx += nameColW;
+    plainText(ctx, isTeam1 ? options.team1Name : options.team2Name, cx, rowY2 + 10, isTeam1 ? c1 : c2, 20, { weight: '600' });
+    cx += teamColW;
+    plainText(ctx, String(data.count), cx, rowY2 + 10, fc, 20, { weight: 'bold' });
+    cx += totalColW;
+    detailCols.forEach(dc => {
+      const v = data.breakdown[dc] || 0;
+      plainText(ctx, v > 0 ? String(v) : '–', cx, rowY2 + 10, v > 0 ? fc : '#BBBBBB', 20);
+      cx += detColW;
+    });
+  });
+
+  // ── Footer branding ─────────────────────────────────────────────────
+  plainText(ctx, 'Touchline', W - 60, H - 40, '#CCCCCC', 20, { align: 'right' });
+}
+
+/* Rounded-rectangle path helper */
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number, r: number,
+) {
+  if (w < 0) { x += w; w = -w; }
+  if (h < 0) { y += h; h = -h; }
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
