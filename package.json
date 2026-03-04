@@ -11,9 +11,9 @@
     "postinstall": "chmod +x node_modules/.bin/tsc node_modules/.bin/vite || true"
   },
   "dependencies": {
+    "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "lucide-react": "^0.468.0",
     "uuid": "^11.0.3"
   },
   "devDependencies": {
@@ -31,6 +31,7 @@
     "tailwindcss": "^3.4.17",
     "typescript": "~5.6.2",
     "typescript-eslint": "^8.18.2",
-    "vite": "^6.0.5"
+    "vite": "^6.0.5",
+    "vitest": "^4.0.18"
   }
 }

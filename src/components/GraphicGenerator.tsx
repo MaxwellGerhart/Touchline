@@ -29,6 +29,9 @@ import { computeShotFeatures, predictXg } from '../utils/xgModel';
 
 type GraphicType = 'playup' | 'shotxg' | 'heatmap' | 'xgtimeline' | 'matchreport';
 type DataSource = 'app' | 'csv';
+type HalfSelection = '1' | '2' | 'both';
+
+const HALF_DURATION_SEC = 45 * 60; // 2700 seconds
 
 // ── CSV parser ──────────────────────────────────────────────────────────────
 
@@ -93,16 +96,24 @@ export function GraphicGenerator() {
   const [sizeBy, setSizeBy] = useState<'xg' | 'distance'>('xg');
   const [generated, setGenerated] = useState(false);
   const [excludedEventTypes, setExcludedEventTypes] = useState<Set<string>>(new Set());
+  const [halfSelection, setHalfSelection] = useState<HalfSelection>('both');
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Derived data ──────────────────────────────────────────────────────
 
+  // Filter in-app events by half selection
+  const halfFilteredAppEvents = useMemo(() => {
+    if (halfSelection === 'both') return appEvents;
+    if (halfSelection === '1') return appEvents.filter(e => e.videoTimestamp < HALF_DURATION_SEC);
+    return appEvents.filter(e => e.videoTimestamp >= HALF_DURATION_SEC);
+  }, [appEvents, halfSelection]);
+
   // Convert in-app MatchEvents → GraphicEvents
   const appGraphicEvents: GraphicEvent[] = useMemo(
     () =>
-      appEvents.map(e => ({
+      halfFilteredAppEvents.map(e => ({
         eventType: e.eventType,
         playerName: e.playerName,
         playerTeam: e.playerTeam,
@@ -111,7 +122,7 @@ export function GraphicGenerator() {
         endX: e.endLocation?.x ?? 0,
         endY: e.endLocation?.y ?? 0,
       })),
-    [appEvents],
+    [halfFilteredAppEvents],
   );
 
   const allEvents = dataSource === 'app' ? appGraphicEvents : csvEvents;
@@ -149,8 +160,58 @@ export function GraphicGenerator() {
     return teamFilteredEvents.filter(e => e.playerName === selectedPlayer);
   }, [selectedPlayer, teamFilteredEvents]);
 
+  // Playup-specific filtered events: include pass events where the selected
+  // player was either the passer OR the receiver (matched via coordinates).
+  const playupFilteredEvents: GraphicEvent[] = useMemo(() => {
+    if (!selectedPlayer) return teamFilteredEvents;
+
+    // Start with all events already attributed to this player
+    const playerEvents = teamFilteredEvents.filter(e => e.playerName === selectedPlayer);
+
+    // Build a set of coordinate keys from this player's "Playup Received" events
+    const receivedKeys = new Set<string>();
+    playerEvents
+      .filter(e => e.eventType.toLowerCase() === 'playup received')
+      .forEach(e => {
+        receivedKeys.add(`${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`);
+      });
+
+    // Also include pass events (from other players) that this player received
+    if (receivedKeys.size > 0) {
+      const passTypes = ['playup platform', 'playup aaa'];
+      const extraPasses = teamFilteredEvents.filter(e => {
+        if (e.playerName === selectedPlayer) return false; // already included
+        if (!passTypes.includes(e.eventType.toLowerCase())) return false;
+        const key = `${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`;
+        return receivedKeys.has(key);
+      });
+      return [...playerEvents, ...extraPasses];
+    }
+
+    // Also check the reverse: if the player made passes, include the received events
+    const passKeys = new Set<string>();
+    const passTypes = ['playup platform', 'playup aaa'];
+    playerEvents
+      .filter(e => passTypes.includes(e.eventType.toLowerCase()))
+      .forEach(e => {
+        passKeys.add(`${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`);
+      });
+
+    if (passKeys.size > 0) {
+      const extraReceived = teamFilteredEvents.filter(e => {
+        if (e.playerName === selectedPlayer) return false;
+        if (e.eventType.toLowerCase() !== 'playup received') return false;
+        const key = `${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`;
+        return passKeys.has(key);
+      });
+      return [...playerEvents, ...extraReceived];
+    }
+
+    return playerEvents;
+  }, [selectedPlayer, teamFilteredEvents]);
+
   // ── Relevant event counts ─────────────────────────────────────────────
-  const playupCount = filteredEvents.filter(
+  const playupCount = playupFilteredEvents.filter(
     e => ['playup platform', 'playup aaa'].includes(e.eventType.toLowerCase()),
   ).length;
   const shotCount = filteredEvents.filter(
@@ -210,7 +271,7 @@ export function GraphicGenerator() {
         subtitle: subtitle || '',
         teamColor,
       };
-      renderPlayupMap(canvas, filteredEvents, opts);
+      renderPlayupMap(canvas, playupFilteredEvents, opts);
     } else if (graphicType === 'shotxg') {
       const opts: ShotMapOptions = {
         teamName: displayName,
@@ -236,7 +297,7 @@ export function GraphicGenerator() {
       };
       renderMatchReport(canvas, reportEvents, opts);
     } else if (graphicType === 'xgtimeline') {
-      // Build XGTimelineEvents from ALL events (both teams needed for timeline)
+      // Build XGTimelineEvents from events (both teams needed for timeline)
       const sourceEvents = dataSource === 'app' ? appGraphicEvents : csvEvents;
       const xgEvents: XGTimelineEvent[] = sourceEvents
         .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
@@ -262,7 +323,7 @@ export function GraphicGenerator() {
 
       // Also use real timestamps from in-app events when available
       if (dataSource === 'app') {
-        const shotAppEvents = appEvents
+        const shotAppEvents = halfFilteredAppEvents
           .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
           .sort((a, b) => a.videoTimestamp - b.videoTimestamp);
         for (let i = 0; i < xgEvents.length && i < shotAppEvents.length; i++) {
@@ -280,7 +341,7 @@ export function GraphicGenerator() {
       renderXGTimeline(canvas, xgEvents, opts);
     }
     setGenerated(true);
-  }, [graphicType, filteredEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, appEvents, reportEvents]);
+  }, [graphicType, filteredEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, halfFilteredAppEvents, reportEvents]);
 
   const exportPNG = useCallback(() => {
     const canvas = canvasRef.current;
@@ -357,6 +418,20 @@ export function GraphicGenerator() {
               </>
             )}
           </div>
+        </label>
+
+        {/* Half selection */}
+        <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+          Half
+          <select
+            value={halfSelection}
+            onChange={e => { setHalfSelection(e.target.value as HalfSelection); setGenerated(false); }}
+            className="px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white"
+          >
+            <option value="both">Both Halves</option>
+            <option value="1">First Half</option>
+            <option value="2">Second Half</option>
+          </select>
         </label>
 
         {/* Team */}
