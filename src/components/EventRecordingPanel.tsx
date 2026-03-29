@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Plus, X, Edit2, Check, Eye, UserPlus } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
 import { useTimer } from '../context/TimerContext';
 import { TeamId, Player, RosterPlayer } from '../types';
 
 export function EventRecordingPanel() {
+  const AUTO_RECORD_STORAGE_KEY = 'touchline_auto_record';
+
   const {
     selectedPlayer,
     selectedTeam,
@@ -56,6 +58,12 @@ export function EventRecordingPanel() {
   const [rosterSearch, setRosterSearch] = useState('');
   const [editingTeam, setEditingTeam] = useState<TeamId | null>(null);
   const [editTeamName, setEditTeamName] = useState('');
+  const [autoRecord, setAutoRecord] = useState<boolean>(() => {
+    const stored = localStorage.getItem(AUTO_RECORD_STORAGE_KEY);
+    if (stored === null) return false; // default off for new users
+    return stored === 'true';
+  });
+  const lastAutoRecordKeyRef = useRef<string>('');
 
   const team1Players = players.filter(p => p.team === 1);
   const team2Players = players.filter(p => p.team === 2);
@@ -141,6 +149,56 @@ export function EventRecordingPanel() {
     : isDriveSlip
     ? selectedPlayer !== null && selectedTeam !== null && driveSlipReceiver !== null && driveSlipReceiverTeam !== null && driveStartLocation !== null && startLocation !== null && endLocation !== null
     : selectedPlayer !== null && selectedTeam !== null && selectedEventType !== null && startLocation !== null;
+
+  const autoRecordKey = isPlayup
+    ? [
+      'playup',
+      selectedEventType ?? '',
+      String(selectedTeam ?? ''),
+      String(selectedPlayer ?? ''),
+      String(playupReceiverTeam ?? ''),
+      String(playupReceiver ?? ''),
+      startLocation ? `${startLocation.x.toFixed(2)}:${startLocation.y.toFixed(2)}` : '',
+      endLocation ? `${endLocation.x.toFixed(2)}:${endLocation.y.toFixed(2)}` : '',
+      effectiveTime.toFixed(2),
+    ].join('|')
+    : isDriveSlip
+    ? [
+      'drive-slip',
+      String(selectedTeam ?? ''),
+      String(selectedPlayer ?? ''),
+      String(driveSlipReceiverTeam ?? ''),
+      String(driveSlipReceiver ?? ''),
+      driveStartLocation ? `${driveStartLocation.x.toFixed(2)}:${driveStartLocation.y.toFixed(2)}` : '',
+      startLocation ? `${startLocation.x.toFixed(2)}:${startLocation.y.toFixed(2)}` : '',
+      endLocation ? `${endLocation.x.toFixed(2)}:${endLocation.y.toFixed(2)}` : '',
+      effectiveTime.toFixed(2),
+    ].join('|')
+    : [
+      'single',
+      selectedEventType ?? '',
+      String(selectedTeam ?? ''),
+      String(selectedPlayer ?? ''),
+      startLocation ? `${startLocation.x.toFixed(2)}:${startLocation.y.toFixed(2)}` : '',
+      endLocation ? `${endLocation.x.toFixed(2)}:${endLocation.y.toFixed(2)}` : '',
+      effectiveTime.toFixed(2),
+    ].join('|');
+
+  useEffect(() => {
+    localStorage.setItem(AUTO_RECORD_STORAGE_KEY, autoRecord ? 'true' : 'false');
+  }, [autoRecord]);
+
+  useEffect(() => {
+    if (!canRecord) {
+      lastAutoRecordKeyRef.current = '';
+      return;
+    }
+    if (!autoRecord) return;
+    if (lastAutoRecordKeyRef.current === autoRecordKey) return;
+
+    lastAutoRecordKeyRef.current = autoRecordKey;
+    handleRecordEvent();
+  }, [autoRecord, canRecord, autoRecordKey]);
 
   const handleRecordEvent = () => {
     if (!canRecord) return;
@@ -665,6 +723,19 @@ export function EventRecordingPanel() {
               </>
             )}
           </div>
+          <button
+            onClick={() => setAutoRecord(prev => !prev)}
+            className={`
+              py-2 px-3 rounded-lg font-semibold text-xs transition-all duration-200
+              ${autoRecord
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : 'bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-700'
+              }
+            `}
+            title="Instantly record when all required fields are set"
+          >
+            Auto: {autoRecord ? 'On' : 'Off'}
+          </button>
           <button
             onClick={handleRecordEvent}
             disabled={!canRecord}
