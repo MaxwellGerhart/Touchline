@@ -12,14 +12,19 @@ export function EventRecordingPanel() {
     playupReceiver,
     playupReceiverTeam,
     setPlayupReceiver,
+    driveSlipReceiver,
+    driveSlipReceiverTeam,
+    setDriveSlipReceiver,
     selectedEventType,
     setSelectedEventType,
+    driveStartLocation,
     startLocation,
     endLocation,
     currentVideoTime,
     players,
     addEvent,
     addPlayupEvent,
+    addDriveSlipEvent,
     resetSelection,
     setHighlightedEventId,
     eventTypes,
@@ -128,9 +133,13 @@ export function EventRecordingPanel() {
   };
 
   const isPlayup = selectedEventType === 'Playup Platform' || selectedEventType === 'Playup AAA';
+  const isDriveSlip = selectedEventType === 'Drive + Slip';
+  const isDualActorEvent = isPlayup || isDriveSlip;
 
   const canRecord = isPlayup
     ? selectedPlayer !== null && selectedTeam !== null && playupReceiver !== null && playupReceiverTeam !== null && startLocation !== null && endLocation !== null
+    : isDriveSlip
+    ? selectedPlayer !== null && selectedTeam !== null && driveSlipReceiver !== null && driveSlipReceiverTeam !== null && driveStartLocation !== null && startLocation !== null && endLocation !== null
     : selectedPlayer !== null && selectedTeam !== null && selectedEventType !== null && startLocation !== null;
 
   const handleRecordEvent = () => {
@@ -142,6 +151,12 @@ export function EventRecordingPanel() {
       const receiver = players.find(p => p.id === playupReceiver && p.team === playupReceiverTeam);
       if (!passer || !receiver) return;
       addPlayupEvent(passer, receiver, startLocation, endLocation, effectiveTime, selectedEventType);
+    } else if (isDriveSlip) {
+      if (selectedPlayer === null || selectedTeam === null || driveSlipReceiver === null || driveSlipReceiverTeam === null || driveStartLocation === null || startLocation === null || endLocation === null) return;
+      const dribbler = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
+      const receiver = players.find(p => p.id === driveSlipReceiver && p.team === driveSlipReceiverTeam);
+      if (!dribbler || !receiver) return;
+      addDriveSlipEvent(dribbler, receiver, driveStartLocation, startLocation, endLocation, effectiveTime);
     } else {
       if (selectedPlayer === null || selectedTeam === null || selectedEventType === null || startLocation === null) return;
       const player = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
@@ -182,27 +197,31 @@ export function EventRecordingPanel() {
 
   // Playup-aware player click handler
   const handlePlayerClick = (playerId: number, team: TeamId) => {
-    if (isPlayup) {
+    if (isDualActorEvent) {
+      const receiver = isPlayup ? playupReceiver : driveSlipReceiver;
+      const receiverTeam = isPlayup ? playupReceiverTeam : driveSlipReceiverTeam;
+      const setReceiver = isPlayup ? setPlayupReceiver : setDriveSlipReceiver;
+
       // If no passer selected yet, or clicking from a different team when passer is set
       if (selectedPlayer === null || selectedTeam === null) {
         setSelectedPlayer(playerId, team);
         // Clear receiver if it was set
-        setPlayupReceiver(null);
+        setReceiver(null);
       } else if (selectedPlayer === playerId && selectedTeam === team) {
         // Clicking the passer again deselects
         setSelectedPlayer(null);
-        setPlayupReceiver(null);
+        setReceiver(null);
       } else if (team !== selectedTeam) {
         // Different team - switch passer to this player
         setSelectedPlayer(playerId, team);
-        setPlayupReceiver(null);
+        setReceiver(null);
       } else {
         // Same team, different player - set as receiver
-        if (playupReceiver === playerId && playupReceiverTeam === team) {
+        if (receiver === playerId && receiverTeam === team) {
           // Deselect receiver
-          setPlayupReceiver(null);
+          setReceiver(null);
         } else {
-          setPlayupReceiver(playerId, team);
+          setReceiver(playerId, team);
         }
       }
     } else {
@@ -216,14 +235,16 @@ export function EventRecordingPanel() {
 
   const getPlayerButtonStyle = (playerId: number, team: TeamId) => {
     const isPasser = selectedPlayer === playerId && selectedTeam === team;
-    const isReceiver = playupReceiver === playerId && playupReceiverTeam === team;
-    if (isPlayup && isPasser) {
+    const receiver = isPlayup ? playupReceiver : driveSlipReceiver;
+    const receiverTeam = isPlayup ? playupReceiverTeam : driveSlipReceiverTeam;
+    const isReceiver = receiver === playerId && receiverTeam === team;
+    if (isDualActorEvent && isPasser) {
       return 'bg-navy dark:bg-rose text-white ring-1 ring-navy dark:ring-rose';
     }
-    if (isPlayup && isReceiver) {
+    if (isDualActorEvent && isReceiver) {
       return 'bg-emerald-500 dark:bg-emerald-600 text-white ring-1 ring-emerald-500 dark:ring-emerald-600';
     }
-    if (!isPlayup && isPasser) {
+    if (!isDualActorEvent && isPasser) {
       return 'bg-navy dark:bg-rose text-white ring-1 ring-navy dark:ring-rose';
     }
     return 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700';
@@ -235,7 +256,7 @@ export function EventRecordingPanel() {
       <div>
         <div className="flex items-center justify-between mb-1">
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-            {isPlayup ? 'Passer & Receiver (same team)' : 'Player'}
+            {isPlayup ? 'Passer & Receiver (same team)' : isDriveSlip ? 'Dribbler & Receiver (same team)' : 'Player'}
           </label>
           <button
             onClick={cyclePlayerDisplayMode}
@@ -309,7 +330,7 @@ export function EventRecordingPanel() {
                       rounded text-center transition-all duration-200 font-bold
                       ${getPlayerButtonStyle(player.id, 1)}
                     `}
-                    title={`${player.name}${isPlayup && selectedPlayer === player.id && selectedTeam === 1 ? ' (Passer)' : ''}${isPlayup && playupReceiver === player.id && playupReceiverTeam === 1 ? ' (Receiver)' : ''}`}
+                    title={`${player.name}${isDualActorEvent && selectedPlayer === player.id && selectedTeam === 1 ? (isDriveSlip ? ' (Dribbler)' : ' (Passer)') : ''}${isDualActorEvent && ((isPlayup ? playupReceiver : driveSlipReceiver) === player.id) && ((isPlayup ? playupReceiverTeam : driveSlipReceiverTeam) === 1) ? ' (Receiver)' : ''}`}
                   >
                     {getPlayerLabel(player)}
                   </button>
@@ -458,7 +479,7 @@ export function EventRecordingPanel() {
                       rounded text-center transition-all duration-200 font-bold
                       ${getPlayerButtonStyle(player.id, 2)}
                     `}
-                    title={`${player.name}${isPlayup && selectedPlayer === player.id && selectedTeam === 2 ? ' (Passer)' : ''}${isPlayup && playupReceiver === player.id && playupReceiverTeam === 2 ? ' (Receiver)' : ''}`}
+                    title={`${player.name}${isDualActorEvent && selectedPlayer === player.id && selectedTeam === 2 ? (isDriveSlip ? ' (Dribbler)' : ' (Passer)') : ''}${isDualActorEvent && ((isPlayup ? playupReceiver : driveSlipReceiver) === player.id) && ((isPlayup ? playupReceiverTeam : driveSlipReceiverTeam) === 2) ? ' (Receiver)' : ''}`}
                   >
                     {getPlayerLabel(player)}
                   </button>
@@ -626,6 +647,15 @@ export function EventRecordingPanel() {
                 {playupReceiver && <span className="text-emerald-600 dark:text-emerald-400 ml-2">Receiver: #{playupReceiver}</span>}
                 {startLocation && endLocation && <span className="text-green-600 dark:text-green-400 ml-2">Locations set</span>}
                 {startLocation && !endLocation && <span className="text-yellow-600 dark:text-yellow-400 ml-2">Drag for end location</span>}
+              </>
+            ) : isDriveSlip ? (
+              <>
+                {selectedPlayer && <span className="text-green-600 dark:text-green-400">Dribbler: #{selectedPlayer}</span>}
+                {driveSlipReceiver && <span className="text-emerald-600 dark:text-emerald-400 ml-2">Receiver: #{driveSlipReceiver}</span>}
+                <span className="text-gray-600 dark:text-gray-400 ml-2">Pitch clicks:</span>
+                <span className={`${driveStartLocation ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'} ml-1`}>1</span>
+                <span className={`${startLocation ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'} ml-1`}>2</span>
+                <span className={`${endLocation ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'} ml-1`}>3</span>
               </>
             ) : (
               <>

@@ -7,6 +7,7 @@ interface EventContextType {
   events: MatchEvent[];
   addEvent: (event: Omit<MatchEvent, 'id' | 'createdAt'>) => void;
   addPlayupEvent: (passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number, playupType: string) => void;
+  addDriveSlipEvent: (dribbler: Player, receiver: Player, driveStartLoc: Position, passStartLoc: Position, passEndLoc: Position, videoTime: number) => void;
   deleteEvent: (id: string) => void;
   updateEventTime: (id: string, newTimestamp: number) => void;
   clearEvents: () => void;
@@ -16,8 +17,13 @@ interface EventContextType {
   playupReceiver: number | null;
   playupReceiverTeam: TeamId | null;
   setPlayupReceiver: (id: number | null, team?: TeamId | null) => void;
+  driveSlipReceiver: number | null;
+  driveSlipReceiverTeam: TeamId | null;
+  setDriveSlipReceiver: (id: number | null, team?: TeamId | null) => void;
   selectedEventType: EventType | null;
   setSelectedEventType: (type: EventType | null) => void;
+  driveStartLocation: Position | null;
+  setDriveStartLocation: (pos: Position | null) => void;
   startLocation: Position | null;
   setStartLocation: (pos: Position | null) => void;
   endLocation: Position | null;
@@ -109,6 +115,8 @@ export function EventProvider({ children }: { children: ReactNode }) {
   const [selectedTeam, setSelectedTeam] = useState<TeamId | null>(null);
   const [playupReceiverState, setPlayupReceiverState] = useState<number | null>(null);
   const [playupReceiverTeamState, setPlayupReceiverTeamState] = useState<TeamId | null>(null);
+  const [driveSlipReceiverState, setDriveSlipReceiverState] = useState<number | null>(null);
+  const [driveSlipReceiverTeamState, setDriveSlipReceiverTeamState] = useState<TeamId | null>(null);
   const [selectedEventType, setSelectedEventType] = useState<EventType | null>(null);
 
   const setSelectedPlayer = useCallback((id: number | null, team?: TeamId | null) => {
@@ -121,6 +129,11 @@ export function EventProvider({ children }: { children: ReactNode }) {
     setPlayupReceiverTeamState(team ?? null);
   }, []);
 
+  const setDriveSlipReceiver = useCallback((id: number | null, team?: TeamId | null) => {
+    setDriveSlipReceiverState(id);
+    setDriveSlipReceiverTeamState(team ?? null);
+  }, []);
+
   const addPlayer = useCallback((id: number, team: TeamId, name?: string) => {
     setPlayers((prev: Player[]) => {
       // Prevent duplicate IDs within the same team
@@ -129,6 +142,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   const [startLocation, setStartLocation] = useState<Position | null>(null);
+  const [driveStartLocation, setDriveStartLocation] = useState<Position | null>(null);
   const [endLocation, setEndLocation] = useState<Position | null>(null);
   const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
   const [currentVideoTime, setCurrentVideoTime] = useState<number>(0);
@@ -269,6 +283,35 @@ export function EventProvider({ children }: { children: ReactNode }) {
     setEvents(prev => [...prev, passEvent, receiveEvent].sort((a, b) => a.videoTimestamp - b.videoTimestamp));
   }, []);
 
+  const addDriveSlipEvent = useCallback((dribbler: Player, receiver: Player, driveStartLoc: Position, passStartLoc: Position, passEndLoc: Position, videoTime: number) => {
+    const now = new Date().toISOString();
+    const driveEvent: MatchEvent = {
+      id: uuidv4(),
+      videoTimestamp: videoTime,
+      playerId: dribbler.id,
+      playerName: dribbler.name,
+      playerTeam: dribbler.team,
+      eventType: 'Drive',
+      driveStartLocation: driveStartLoc,
+      startLocation: passStartLoc,
+      endLocation: passEndLoc,
+      createdAt: now,
+    };
+    const receiveEvent: MatchEvent = {
+      id: uuidv4(),
+      videoTimestamp: videoTime,
+      playerId: receiver.id,
+      playerName: receiver.name,
+      playerTeam: receiver.team,
+      eventType: 'Slip Received',
+      driveStartLocation: driveStartLoc,
+      startLocation: passStartLoc,
+      endLocation: passEndLoc,
+      createdAt: now,
+    };
+    setEvents(prev => [...prev, driveEvent, receiveEvent].sort((a, b) => a.videoTimestamp - b.videoTimestamp));
+  }, []);
+
   const deleteEvent = useCallback((id: string) => {
     setEvents(prev => prev.filter(e => e.id !== id));
     if (highlightedEventId === id) {
@@ -374,7 +417,10 @@ export function EventProvider({ children }: { children: ReactNode }) {
     setSelectedTeam(null);
     setPlayupReceiverState(null);
     setPlayupReceiverTeamState(null);
+    setDriveSlipReceiverState(null);
+    setDriveSlipReceiverTeamState(null);
     setSelectedEventType(null);
+    setDriveStartLocation(null);
     setStartLocation(null);
     setEndLocation(null);
   }, []);
@@ -385,6 +431,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
         events,
         addEvent,
         addPlayupEvent,
+        addDriveSlipEvent,
         deleteEvent,
         updateEventTime,
         clearEvents,
@@ -394,8 +441,13 @@ export function EventProvider({ children }: { children: ReactNode }) {
         playupReceiver: playupReceiverState,
         playupReceiverTeam: playupReceiverTeamState,
         setPlayupReceiver,
+        driveSlipReceiver: driveSlipReceiverState,
+        driveSlipReceiverTeam: driveSlipReceiverTeamState,
+        setDriveSlipReceiver,
         selectedEventType,
         setSelectedEventType,
+        driveStartLocation,
+        setDriveStartLocation,
         startLocation,
         setStartLocation,
         endLocation,

@@ -144,6 +144,10 @@ export function EventLog() {
       Goal: 'bg-emerald-500',
       Playup: 'bg-indigo-500',
       'Playup Received': 'bg-indigo-400',
+      'Drive + Slip': 'bg-violet-600',
+      Drive: 'bg-violet-500',
+      Slip: 'bg-violet-400',
+      'Slip Received': 'bg-violet-300',
     };
     return colors[type] || 'bg-gray-500';
   };

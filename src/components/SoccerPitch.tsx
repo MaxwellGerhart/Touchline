@@ -21,6 +21,9 @@ export function SoccerPitch() {
   const [resizeAnchor, setResizeAnchor] = useState<Position | null>(null);
   
   const {
+    selectedEventType,
+    driveStartLocation,
+    setDriveStartLocation,
     startLocation,
     setStartLocation,
     endLocation,
@@ -31,6 +34,7 @@ export function SoccerPitch() {
 
   const { isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive, setIsDrillActive, setPendingArea, drawingForNewSession, setDrawingForNewSession } = useDrill();
   const { activeSession, updateSession } = useSession();
+  const isDriveSlip = selectedEventType === 'Drive + Slip';
 
   const highlightedEvent = events.find(e => e.id === highlightedEventId);
 
@@ -151,6 +155,29 @@ export function SoccerPitch() {
       return;
     }
 
+    if (isDriveSlip) {
+      // Drive + Slip uses a 3-click sequence:
+      // 1) dribble start, 2) dribble end / pass start, 3) pass end.
+      if (isDrillActive && drillArea && !isInsideDrillArea(pos)) return;
+
+      if (!driveStartLocation) {
+        setDriveStartLocation(pos);
+        setStartLocation(null);
+        setEndLocation(null);
+      } else if (!startLocation) {
+        setStartLocation(pos);
+        setEndLocation(null);
+      } else if (!endLocation) {
+        setEndLocation(pos);
+      } else {
+        // Start a new sequence after the third point is already set.
+        setDriveStartLocation(pos);
+        setStartLocation(null);
+        setEndLocation(null);
+      }
+      return;
+    }
+
     // Normal event tagging drag — reject if outside drill area when drill is active
     if (isDrillActive && drillArea && !isInsideDrillArea(pos)) return;
 
@@ -159,7 +186,7 @@ export function SoccerPitch() {
     setDragEnd(null);
     setStartLocation(null);
     setEndLocation(null);
-  }, [getPositionFromEvent, setStartLocation, setEndLocation, isDrawingDrillArea, drillCorner1, setIsDrawingDrillArea, isDrillActive, drillArea, isInsideDrillArea, setPendingArea, drawingForNewSession, activeSession, updateSession, setDrawingForNewSession]);
+  }, [getPositionFromEvent, isDriveSlip, driveStartLocation, startLocation, endLocation, setDriveStartLocation, setStartLocation, setEndLocation, isDrawingDrillArea, drillCorner1, setIsDrawingDrillArea, isDrillActive, drillArea, isInsideDrillArea, setPendingArea, drawingForNewSession, activeSession, updateSession, setDrawingForNewSession]);
 
   // ── Mouse move (shared: event drag, drill preview, resize) ──
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -377,31 +404,57 @@ export function SoccerPitch() {
         })()}
 
         {/* Selected location marker */}
-        {startLocation && !isDragging && (() => {
-          const sl = toDisplayCoords(startLocation);
+        {(isDriveSlip ? driveStartLocation : startLocation) && !isDragging && (() => {
+          const dl = driveStartLocation ? toDisplayCoords(driveStartLocation) : null;
+          const sl = startLocation ? toDisplayCoords(startLocation) : null;
           const el = endLocation ? toDisplayCoords(endLocation) : null;
           return (
             <svg className="absolute inset-0 w-full h-full pointer-events-none">
-              {el ? (
+              {isDriveSlip ? (
                 <>
-                  <line
-                    x1={`${sl.x}%`} y1={`${sl.y}%`}
-                    x2={`${el.x}%`} y2={`${el.y}%`}
-                    stroke="#FFD700" strokeWidth="3"
-                  />
-                  <circle cx={`${sl.x}%`} cy={`${sl.y}%`} r="8" fill="#FFD700" opacity="0.6" />
-                  <circle cx={`${el.x}%`} cy={`${el.y}%`} r="8" fill="#FFD700" stroke="#FFA500" strokeWidth="2" />
-                  <polygon
-                    points={`${el.x},${el.y - 1.5} ${el.x - 1},${el.y + 0.5} ${el.x + 1},${el.y + 0.5}`}
-                    fill="#FFD700"
-                    style={{
-                      transform: `rotate(${Math.atan2(el.y - sl.y, el.x - sl.x) * 180 / Math.PI + 90}deg)`,
-                      transformOrigin: `${el.x}% ${el.y}%`,
-                    }}
-                  />
+                  {dl && <circle cx={`${dl.x}%`} cy={`${dl.y}%`} r="7" fill="#A855F7" opacity="0.9" />}
+                  {dl && sl && (
+                    <line
+                      x1={`${dl.x}%`} y1={`${dl.y}%`}
+                      x2={`${sl.x}%`} y2={`${sl.y}%`}
+                      stroke="#A855F7" strokeWidth="3"
+                      strokeDasharray="7 5"
+                    />
+                  )}
+                  {sl && <circle cx={`${sl.x}%`} cy={`${sl.y}%`} r="7" fill="#7C3AED" opacity="0.95" />}
+                  {sl && el && (
+                    <line
+                      x1={`${sl.x}%`} y1={`${sl.y}%`}
+                      x2={`${el.x}%`} y2={`${el.y}%`}
+                      stroke="#5B21B6" strokeWidth="3"
+                    />
+                  )}
+                  {el && <circle cx={`${el.x}%`} cy={`${el.y}%`} r="8" fill="#5B21B6" stroke="#DDD6FE" strokeWidth="2" />}
                 </>
               ) : (
-                <circle cx={`${sl.x}%`} cy={`${sl.y}%`} r="10" fill="#FFD700" opacity="0.6" />
+                <>
+                  {sl && el ? (
+                    <>
+                      <line
+                        x1={`${sl.x}%`} y1={`${sl.y}%`}
+                        x2={`${el.x}%`} y2={`${el.y}%`}
+                        stroke="#FFD700" strokeWidth="3"
+                      />
+                      <circle cx={`${sl.x}%`} cy={`${sl.y}%`} r="8" fill="#FFD700" opacity="0.6" />
+                      <circle cx={`${el.x}%`} cy={`${el.y}%`} r="8" fill="#FFD700" stroke="#FFA500" strokeWidth="2" />
+                      <polygon
+                        points={`${el.x},${el.y - 1.5} ${el.x - 1},${el.y + 0.5} ${el.x + 1},${el.y + 0.5}`}
+                        fill="#FFD700"
+                        style={{
+                          transform: `rotate(${Math.atan2(el.y - sl.y, el.x - sl.x) * 180 / Math.PI + 90}deg)`,
+                          transformOrigin: `${el.x}% ${el.y}%`,
+                        }}
+                      />
+                    </>
+                  ) : (
+                    sl && <circle cx={`${sl.x}%`} cy={`${sl.y}%`} r="10" fill="#FFD700" opacity="0.6" />
+                  )}
+                </>
               )}
             </svg>
           );
@@ -409,10 +462,19 @@ export function SoccerPitch() {
 
         {/* Highlighted event from log */}
         {highlightedEvent && (() => {
+          const hd = highlightedEvent.driveStartLocation ? toDisplayCoords(highlightedEvent.driveStartLocation) : null;
           const hs = toDisplayCoords(highlightedEvent.startLocation);
           const he = highlightedEvent.endLocation ? toDisplayCoords(highlightedEvent.endLocation) : null;
           return (
             <svg className="absolute inset-0 w-full h-full pointer-events-none">
+              {hd && (
+                <line
+                  x1={`${hd.x}%`} y1={`${hd.y}%`}
+                  x2={`${hs.x}%`} y2={`${hs.y}%`}
+                  stroke="#60A5FA" strokeWidth="3"
+                  strokeDasharray="7 5"
+                />
+              )}
               {he ? (
                 <>
                   <line

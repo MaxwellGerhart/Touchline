@@ -4,14 +4,20 @@ import { useEvents } from '../context/EventContext';
 import {
   GraphicEvent,
   PlayupMapOptions,
+  DriveSlipMapOptions,
   ShotMapOptions,
   HeatmapOptions,
+  MidRecoveriesOptions,
+  FirstSecondBallMapOptions,
   XGTimelineOptions,
   XGTimelineEvent,
   MatchReportOptions,
   renderPlayupMap,
+  renderDriveSlipMap,
   renderShotMap,
   renderDefensiveHeatmap,
+  renderMidRecoveriesHeatmap,
+  renderFirstSecondBallMap,
   renderXGTimeline,
   renderMatchReport,
   PLAYUP_CANVAS_W,
@@ -27,7 +33,7 @@ import {
 } from '../utils/pitchRenderer';
 import { computeShotFeatures, predictXg } from '../utils/xgModel';
 
-type GraphicType = 'playup' | 'shotxg' | 'heatmap' | 'xgtimeline' | 'matchreport';
+type GraphicType = 'playup' | 'driveslip' | 'shotxg' | 'heatmap' | 'midrecoveries' | 'firstsecondball' | 'xgtimeline' | 'matchreport';
 type DataSource = 'app' | 'csv';
 type HalfSelection = '1' | '2' | 'both';
 
@@ -44,6 +50,8 @@ function parseCSV(text: string): GraphicEvent[] {
     eventType:  headers.indexOf('Event Type'),
     playerName: headers.indexOf('Player Name'),
     playerTeam: headers.indexOf('Player Team'),
+    driveStartX: headers.indexOf('Drive Start X'),
+    driveStartY: headers.indexOf('Drive Start Y'),
     startX:     headers.indexOf('Start X'),
     startY:     headers.indexOf('Start Y'),
     endX:       headers.indexOf('End X'),
@@ -65,6 +73,8 @@ function parseCSV(text: string): GraphicEvent[] {
       eventType:  cells[idx.eventType] || '',
       playerName: cells[idx.playerName] || '',
       playerTeam: cells[idx.playerTeam] || '',
+      driveStartX: idx.driveStartX >= 0 ? parseFloat(cells[idx.driveStartX]) || undefined : undefined,
+      driveStartY: idx.driveStartY >= 0 ? parseFloat(cells[idx.driveStartY]) || undefined : undefined,
       startX,
       startY,
       endX: parseFloat(cells[idx.endX]) || 0,
@@ -94,6 +104,14 @@ export function GraphicGenerator() {
   const [teamColor, setTeamColor] = useState('#001E44');
   const [team2Color, setTeam2Color] = useState('#C41E3A');
   const [sizeBy, setSizeBy] = useState<'xg' | 'distance'>('xg');
+  const [showMidGuides, setShowMidGuides] = useState(true);
+  const [showMidPlayerNames, setShowMidPlayerNames] = useState(false);
+  const [midGuideColor, setMidGuideColor] = useState('#888888');
+  const [midGuideStyle, setMidGuideStyle] = useState<'dotted' | 'dashed'>('dotted');
+  const [midGuideWidth, setMidGuideWidth] = useState(1.5);
+  const [showMidThirds, setShowMidThirds] = useState(true);
+  const [showMidPenaltyLanes, setShowMidPenaltyLanes] = useState(true);
+  const [firstSecondGridStyle, setFirstSecondGridStyle] = useState<'dotted' | 'dashed'>('dotted');
   const [generated, setGenerated] = useState(false);
   const [excludedEventTypes, setExcludedEventTypes] = useState<Set<string>>(new Set());
   const [halfSelection, setHalfSelection] = useState<HalfSelection>('both');
@@ -117,6 +135,9 @@ export function GraphicGenerator() {
         eventType: e.eventType,
         playerName: e.playerName,
         playerTeam: e.playerTeam,
+        videoTimestamp: e.videoTimestamp,
+        driveStartX: e.driveStartLocation?.x,
+        driveStartY: e.driveStartLocation?.y,
         startX: e.startLocation.x,
         startY: e.startLocation.y,
         endX: e.endLocation?.x ?? 0,
@@ -159,6 +180,40 @@ export function GraphicGenerator() {
     if (!selectedPlayer) return teamFilteredEvents;
     return teamFilteredEvents.filter(e => e.playerName === selectedPlayer);
   }, [selectedPlayer, teamFilteredEvents]);
+
+  // Mid recoveries: normalize direction by mirroring second-half in-app events.
+  const midRecoveriesEvents: GraphicEvent[] = useMemo(() => {
+    if (dataSource !== 'app') return filteredEvents;
+    return filteredEvents.map(e => {
+      if (typeof e.videoTimestamp !== 'number' || e.videoTimestamp < HALF_DURATION_SEC) {
+        return e;
+      }
+      return {
+        ...e,
+        startX: 100 - e.startX,
+        startY: 100 - e.startY,
+        endX: 100 - e.endX,
+        endY: 100 - e.endY,
+      };
+    });
+  }, [dataSource, filteredEvents]);
+
+  // First + Second Ball map: normalize direction by mirroring second-half in-app events.
+  const firstSecondBallEvents: GraphicEvent[] = useMemo(() => {
+    if (dataSource !== 'app') return filteredEvents;
+    return filteredEvents.map(e => {
+      if (typeof e.videoTimestamp !== 'number' || e.videoTimestamp < HALF_DURATION_SEC) {
+        return e;
+      }
+      return {
+        ...e,
+        startX: 100 - e.startX,
+        startY: 100 - e.startY,
+        endX: 100 - e.endX,
+        endY: 100 - e.endY,
+      };
+    });
+  }, [dataSource, filteredEvents]);
 
   // Playup-specific filtered events: include pass events where the selected
   // player was either the passer OR the receiver (matched via coordinates).
@@ -210,15 +265,66 @@ export function GraphicGenerator() {
     return playerEvents;
   }, [selectedPlayer, teamFilteredEvents]);
 
+  const driveSlipFilteredEvents: GraphicEvent[] = useMemo(() => {
+    if (!selectedPlayer) return teamFilteredEvents;
+
+    const playerEvents = teamFilteredEvents.filter(e => e.playerName === selectedPlayer);
+
+    const receiverKeys = new Set<string>();
+    playerEvents
+      .filter(e => e.eventType.toLowerCase() === 'slip received')
+      .forEach(e => {
+        receiverKeys.add(`${(e.driveStartX ?? -1).toFixed(2)},${(e.driveStartY ?? -1).toFixed(2)},${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`);
+      });
+
+    if (receiverKeys.size > 0) {
+      const extraDrives = teamFilteredEvents.filter(e => {
+        if (e.playerName === selectedPlayer) return false;
+        if (!['drive', 'slip'].includes(e.eventType.toLowerCase())) return false;
+        const key = `${(e.driveStartX ?? -1).toFixed(2)},${(e.driveStartY ?? -1).toFixed(2)},${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`;
+        return receiverKeys.has(key);
+      });
+      return [...playerEvents, ...extraDrives];
+    }
+
+    const driveKeys = new Set<string>();
+    playerEvents
+      .filter(e => ['drive', 'slip'].includes(e.eventType.toLowerCase()))
+      .forEach(e => {
+        driveKeys.add(`${(e.driveStartX ?? -1).toFixed(2)},${(e.driveStartY ?? -1).toFixed(2)},${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`);
+      });
+
+    if (driveKeys.size > 0) {
+      const extraReceivers = teamFilteredEvents.filter(e => {
+        if (e.playerName === selectedPlayer) return false;
+        if (e.eventType.toLowerCase() !== 'slip received') return false;
+        const key = `${(e.driveStartX ?? -1).toFixed(2)},${(e.driveStartY ?? -1).toFixed(2)},${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`;
+        return driveKeys.has(key);
+      });
+      return [...playerEvents, ...extraReceivers];
+    }
+
+    return playerEvents;
+  }, [selectedPlayer, teamFilteredEvents]);
+
   // ── Relevant event counts ─────────────────────────────────────────────
   const playupCount = playupFilteredEvents.filter(
     e => ['playup platform', 'playup aaa'].includes(e.eventType.toLowerCase()),
+  ).length;
+  const driveSlipCount = driveSlipFilteredEvents.filter(
+    e => ['drive', 'slip'].includes(e.eventType.toLowerCase()),
   ).length;
   const shotCount = filteredEvents.filter(
     e => e.eventType === 'Shot' || e.eventType === 'Goal',
   ).length;
   const defCount = filteredEvents.filter(
     e => e.eventType === 'Tackle' || e.eventType === 'Interception',
+  ).length;
+  const midRecoveryCount = filteredEvents.filter(
+    e => e.eventType.toLowerCase() === 'mid recovery',
+  ).length;
+  const firstSecondBallCount = filteredEvents.filter(
+    e => e.eventType.toLowerCase() === 'first ball' || e.eventType.toLowerCase() === 'second ball',
   ).length;
 
   // Available event types for match report filter
@@ -272,6 +378,13 @@ export function GraphicGenerator() {
         teamColor,
       };
       renderPlayupMap(canvas, playupFilteredEvents, opts);
+    } else if (graphicType === 'driveslip') {
+      const opts: DriveSlipMapOptions = {
+        teamName: displayName,
+        subtitle: subtitle || '',
+        teamColor,
+      };
+      renderDriveSlipMap(canvas, driveSlipFilteredEvents, opts);
     } else if (graphicType === 'shotxg') {
       const opts: ShotMapOptions = {
         teamName: displayName,
@@ -287,6 +400,33 @@ export function GraphicGenerator() {
         teamColor,
       };
       renderDefensiveHeatmap(canvas, filteredEvents, opts);
+    } else if (graphicType === 'midrecoveries') {
+      const opts: MidRecoveriesOptions = {
+        teamName: displayName,
+        subtitle: subtitle || '',
+        teamColor,
+        showGuides: showMidGuides,
+        showPlayerNames: showMidPlayerNames,
+        guideColor: midGuideColor,
+        guideStyle: midGuideStyle,
+        guideWidth: midGuideWidth,
+        showThirdsGuides: showMidThirds,
+        showPenaltyLaneGuides: showMidPenaltyLanes,
+      };
+      renderMidRecoveriesHeatmap(canvas, midRecoveriesEvents, opts);
+    } else if (graphicType === 'firstsecondball') {
+      const opts: FirstSecondBallMapOptions = {
+        teamName: displayName,
+        subtitle: subtitle || '',
+        team1Id: dataSource === 'app' ? '1' : (teams[0] || ''),
+        team2Id: dataSource === 'app' ? '2' : (teams[1] || ''),
+        team1Name: teams[0] || teamNames.team1 || 'Team 1',
+        team2Name: teams[1] || teamNames.team2 || 'Team 2',
+        team1Color: teamColor,
+        team2Color: team2Color,
+        gridStyle: firstSecondGridStyle,
+      };
+      renderFirstSecondBallMap(canvas, firstSecondBallEvents, opts);
     } else if (graphicType === 'matchreport') {
       const opts: MatchReportOptions = {
         team1Name: teams[0] || teamNames.team1 || 'Team 1',
@@ -341,7 +481,7 @@ export function GraphicGenerator() {
       renderXGTimeline(canvas, xgEvents, opts);
     }
     setGenerated(true);
-  }, [graphicType, filteredEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, halfFilteredAppEvents, reportEvents]);
+  }, [graphicType, filteredEvents, playupFilteredEvents, driveSlipFilteredEvents, midRecoveriesEvents, firstSecondBallEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, halfFilteredAppEvents, reportEvents, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle]);
 
   const exportPNG = useCallback(() => {
     const canvas = canvasRef.current;
@@ -360,8 +500,8 @@ export function GraphicGenerator() {
   ).length;
 
   // ── Canvas display dimensions ─────────────────────────────────────────
-  const canvasW = graphicType === 'playup' ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : graphicType === 'xgtimeline' ? XG_TIMELINE_W : graphicType === 'matchreport' ? REPORT_CANVAS_W : HEATMAP_CANVAS_W;
-  const canvasH = graphicType === 'playup' ? PLAYUP_CANVAS_H : graphicType === 'shotxg' ? SHOT_CANVAS_H : graphicType === 'xgtimeline' ? XG_TIMELINE_H : graphicType === 'matchreport' ? REPORT_CANVAS_H : HEATMAP_CANVAS_H;
+  const canvasW = (graphicType === 'playup' || graphicType === 'driveslip') ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : graphicType === 'xgtimeline' ? XG_TIMELINE_W : graphicType === 'matchreport' ? REPORT_CANVAS_W : HEATMAP_CANVAS_W;
+  const canvasH = (graphicType === 'playup' || graphicType === 'driveslip') ? PLAYUP_CANVAS_H : graphicType === 'shotxg' ? SHOT_CANVAS_H : graphicType === 'xgtimeline' ? XG_TIMELINE_H : graphicType === 'matchreport' ? REPORT_CANVAS_H : HEATMAP_CANVAS_H;
 
   // ═════════════════════════════════════════════════════════════════════
   //  Render
@@ -380,8 +520,11 @@ export function GraphicGenerator() {
             className="px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white"
           >
             <option value="playup">Playup Map</option>
+            <option value="driveslip">Drive + Slip Map</option>
             <option value="shotxg">Shot / xG Map</option>
             <option value="heatmap">Defensive Heatmap</option>
+            <option value="midrecoveries">Mid Recoveries</option>
+            <option value="firstsecondball">First + Second Ball Map</option>
             <option value="xgtimeline">xG Timeline</option>
             <option value="matchreport">Match Report</option>
           </select>
@@ -514,7 +657,7 @@ export function GraphicGenerator() {
         </label>
 
         {/* Team 2 colour (xG timeline / match report) */}
-        {(graphicType === 'xgtimeline' || graphicType === 'matchreport') && (
+        {(graphicType === 'xgtimeline' || graphicType === 'matchreport' || graphicType === 'firstsecondball') && (
           <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
             Team 2 Color
             <div className="flex items-center gap-1.5">
@@ -568,6 +711,110 @@ export function GraphicGenerator() {
             </select>
           </label>
         )}
+
+        {/* Mid recoveries guide config */}
+        {graphicType === 'midrecoveries' && (
+          <>
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={showMidGuides}
+                onChange={e => { setShowMidGuides(e.target.checked); setGenerated(false); }}
+                className="rounded border-gray-300 dark:border-gray-700"
+              />
+              Show Guide Lines
+            </label>
+
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={showMidPlayerNames}
+                onChange={e => { setShowMidPlayerNames(e.target.checked); setGenerated(false); }}
+                className="rounded border-gray-300 dark:border-gray-700"
+              />
+              Show Player Names
+            </label>
+
+            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+              Guide Style
+              <select
+                value={midGuideStyle}
+                onChange={e => { setMidGuideStyle(e.target.value as 'dotted' | 'dashed'); setGenerated(false); }}
+                disabled={!showMidGuides}
+                className="px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white disabled:opacity-50"
+              >
+                <option value="dotted">Dotted</option>
+                <option value="dashed">Dashed</option>
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+              Guide Width
+              <input
+                type="range"
+                min={1}
+                max={4}
+                step={0.5}
+                value={midGuideWidth}
+                onChange={e => { setMidGuideWidth(Number(e.target.value)); setGenerated(false); }}
+                disabled={!showMidGuides}
+                className="w-28"
+              />
+              <span className="text-[10px] text-gray-500">{midGuideWidth.toFixed(1)} px</span>
+            </label>
+
+            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+              Guide Color
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="color"
+                  value={midGuideColor}
+                  onChange={e => { setMidGuideColor(e.target.value); setGenerated(false); }}
+                  disabled={!showMidGuides}
+                  className="w-8 h-8 rounded border border-gray-300 dark:border-gray-700 cursor-pointer disabled:opacity-50"
+                />
+                <span className="text-[10px] font-mono text-gray-500">{midGuideColor}</span>
+              </div>
+            </label>
+
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={showMidThirds}
+                onChange={e => { setShowMidThirds(e.target.checked); setGenerated(false); }}
+                disabled={!showMidGuides}
+                className="rounded border-gray-300 dark:border-gray-700"
+              />
+              Show Vertical Thirds
+            </label>
+
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={showMidPenaltyLanes}
+                onChange={e => { setShowMidPenaltyLanes(e.target.checked); setGenerated(false); }}
+                disabled={!showMidGuides}
+                className="rounded border-gray-300 dark:border-gray-700"
+              />
+              Show 18-Yard Lane Lines
+            </label>
+          </>
+        )}
+
+        {/* First + Second Ball grid style */}
+        {graphicType === 'firstsecondball' && (
+          <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+            Grid Style
+            <select
+              value={firstSecondGridStyle}
+              onChange={e => { setFirstSecondGridStyle(e.target.value as 'dotted' | 'dashed'); setGenerated(false); }}
+              className="px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white"
+            >
+              <option value="dotted">Dotted</option>
+              <option value="dashed">Dashed</option>
+            </select>
+          </label>
+        )}
       </div>
 
       {/* ── Action buttons ────────────────────────────────────────────── */}
@@ -576,8 +823,11 @@ export function GraphicGenerator() {
           onClick={generate}
           disabled={
             (graphicType === 'playup' && playupCount === 0) ||
+            (graphicType === 'driveslip' && driveSlipCount === 0) ||
             (graphicType === 'shotxg' && shotCount === 0) ||
             (graphicType === 'heatmap' && defCount === 0) ||
+            (graphicType === 'midrecoveries' && midRecoveryCount === 0) ||
+            (graphicType === 'firstsecondball' && firstSecondBallCount === 0) ||
             (graphicType === 'xgtimeline' && xgTimelineShotCount === 0) ||
             (graphicType === 'matchreport' && reportEvents.length === 0)
           }
@@ -600,12 +850,18 @@ export function GraphicGenerator() {
         <span className="text-xs text-gray-500 dark:text-gray-400">
           {graphicType === 'playup'
             ? `${playupCount} playup event${playupCount !== 1 ? 's' : ''} available`
+            : graphicType === 'driveslip'
+            ? `${driveSlipCount} drive/slip event${driveSlipCount !== 1 ? 's' : ''} available`
             : graphicType === 'shotxg'
             ? `${shotCount} shot/goal event${shotCount !== 1 ? 's' : ''} available`
             : graphicType === 'xgtimeline'
             ? `${xgTimelineShotCount} shot/goal event${xgTimelineShotCount !== 1 ? 's' : ''} available`
+            : graphicType === 'firstsecondball'
+            ? `${firstSecondBallCount} first/second ball event${firstSecondBallCount !== 1 ? 's' : ''} available`
             : graphicType === 'matchreport'
             ? `${reportEvents.length} total event${reportEvents.length !== 1 ? 's' : ''} available`
+            : graphicType === 'midrecoveries'
+            ? `${midRecoveryCount} mid recovery event${midRecoveryCount !== 1 ? 's' : ''} available`
             : `${defCount} tackle/interception event${defCount !== 1 ? 's' : ''} available`}
         </span>
       </div>

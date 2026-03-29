@@ -133,6 +133,17 @@ export function parseCSV(csvText: string): ImportResult {
 
     const startLocation: Position = { x: startX, y: startY };
 
+    let driveStartLocation: Position | undefined;
+    const driveStartXRaw = get(cols, 'Drive Start X');
+    const driveStartYRaw = get(cols, 'Drive Start Y');
+    if (driveStartXRaw !== '' && driveStartYRaw !== '') {
+      const driveStartX = parseFloat(driveStartXRaw);
+      const driveStartY = parseFloat(driveStartYRaw);
+      if (!isNaN(driveStartX) && !isNaN(driveStartY)) {
+        driveStartLocation = { x: driveStartX, y: driveStartY };
+      }
+    }
+
     let endLocation: Position | undefined;
     const endXRaw = get(cols, 'End X');
     const endYRaw = get(cols, 'End Y');
@@ -151,6 +162,7 @@ export function parseCSV(csvText: string): ImportResult {
       playerName: get(cols, 'Player Name'),
       playerTeam,
       eventType: get(cols, 'Event Type'),
+      driveStartLocation,
       startLocation,
       endLocation,
       drillType: get(cols, 'Drill Type') || undefined,

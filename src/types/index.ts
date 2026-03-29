@@ -31,6 +31,7 @@ export interface MatchEvent {
   playerName: string;
   playerTeam: TeamId;
   eventType: EventType;
+  driveStartLocation?: Position; // Optional for Drive + Slip dribble path start
   startLocation: Position;
   endLocation?: Position; // Optional for directional events
   drillType?: string;                 // Drill type when event was recorded
@@ -83,6 +84,10 @@ export const DEFAULT_EVENT_TYPES: string[] = [
   'Goal',
   'Playup Platform',
   'Playup AAA',
+  'Drive + Slip',
+  'Drive',
+  'Slip',
+  'Slip Received',
 ];
 
   // Roster management

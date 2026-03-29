@@ -22,6 +22,9 @@ export interface GraphicEvent {
   eventType: string;
   playerName: string;
   playerTeam: string | number;
+  videoTimestamp?: number;
+  driveStartX?: number;
+  driveStartY?: number;
   startX: number; // opta 0-100
   startY: number; // opta 0-100
   endX: number;
@@ -29,6 +32,12 @@ export interface GraphicEvent {
 }
 
 export interface PlayupMapOptions {
+  teamName: string;
+  subtitle: string;
+  teamColor: string;
+}
+
+export interface DriveSlipMapOptions {
   teamName: string;
   subtitle: string;
   teamColor: string;
@@ -45,6 +54,31 @@ export interface HeatmapOptions {
   teamName: string;
   subtitle: string;
   teamColor: string;
+}
+
+export interface MidRecoveriesOptions {
+  teamName: string;
+  subtitle: string;
+  teamColor: string;
+  showGuides?: boolean;
+  showPlayerNames?: boolean;
+  guideColor?: string;
+  guideStyle?: 'dotted' | 'dashed';
+  guideWidth?: number;
+  showThirdsGuides?: boolean;
+  showPenaltyLaneGuides?: boolean;
+}
+
+export interface FirstSecondBallMapOptions {
+  teamName: string;
+  subtitle: string;
+  team1Id?: string;
+  team2Id?: string;
+  team1Name?: string;
+  team2Name?: string;
+  team1Color: string;
+  team2Color: string;
+  gridStyle?: 'dotted' | 'dashed';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -351,6 +385,226 @@ function drawFullPitch(
       penArc(psx, psy, -halfAngle,  halfAngle, true);  // sweeps through 0
     }
   }
+}
+
+function drawFullPitchGuides(
+  ctx: CanvasRenderingContext2D,
+  r: Rect,
+  opts?: {
+    lineColor?: string;
+    style?: 'dotted' | 'dashed';
+    lineWidth?: number;
+    showThirds?: boolean;
+    showPenaltyLanes?: boolean;
+  },
+) {
+  const lineColor = opts?.lineColor ?? SHOT_GREY;
+  const style = opts?.style ?? 'dotted';
+  const showThirds = opts?.showThirds ?? true;
+  const showPenaltyLanes = opts?.showPenaltyLanes ?? true;
+  const lw = opts?.lineWidth ?? Math.max(1, r.w / 1300);
+  const dashOn = style === 'dashed' ? Math.max(8, r.w / 75) : Math.max(5, r.w / 160);
+  const dashOff = style === 'dashed' ? Math.max(6, r.w / 110) : Math.max(5, r.w / 220);
+
+  const m = (mX: number, mY: number) => meterFull(mX, mY, r);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
+  ctx.clip();
+
+  ctx.setLineDash([dashOn, dashOff]);
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = lw;
+
+  // Vertical thirds of the full pitch length.
+  if (showThirds) {
+    for (const xM of [PL / 3, (2 * PL) / 3]) {
+      const [x, y0] = m(xM, 0);
+      const [, y1] = m(xM, PW);
+      ctx.beginPath();
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x, y1);
+      ctx.stroke();
+    }
+  }
+
+  // Horizontal guides from the 18-yard box edges.
+  if (showPenaltyLanes) {
+    for (const yM of [PA_Y0, PA_Y1]) {
+      const [x0, y] = m(0, yM);
+      const [x1] = m(PL, yM);
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+function draw18ZoneGrid(
+  ctx: CanvasRenderingContext2D,
+  r: Rect,
+  lineColor: string,
+  style: 'dotted' | 'dashed' = 'dotted',
+) {
+  const isDotted = style === 'dotted';
+  const baseLw = Math.max(1, r.w / 900);
+  const lw = isDotted ? Math.max(2, baseLw * 1.8) : baseLw;
+  const m = (mX: number, mY: number) => meterFull(mX, mY, r);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
+  ctx.clip();
+  
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+
+  const xGuides = [PA_DEPTH, PL / 3, (2 * PL) / 3, PL - PA_DEPTH];
+  const yGuides = [PA_Y0, GA_Y0, GA_Y1, PA_Y1];
+
+  // For dotted mode: draw line segments between intersections with calculated dash pattern
+  // For dashed mode: draw full lines with standard dash pattern
+  
+  if (isDotted) {
+    // Dotted: draw segments between intersection points with pattern that aligns dots
+    // Draw vertical segments
+    for (let xi = 0; xi < xGuides.length; xi++) {
+      const xM = xGuides[xi];
+      const [x] = m(xM, 0);
+      
+      // Draw segment from 0 to first guide
+      let [, y0] = m(xM, 0);
+      let [, y1] = m(xM, yGuides[0]);
+      const dist0 = Math.hypot(x - x, y1 - y0);
+      const pattern0 = calculateDottedPattern(dist0, lw);
+      ctx.setLineDash(pattern0);
+      ctx.beginPath();
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x, y1);
+      ctx.stroke();
+      
+      // Draw segments between guides
+      for (let yi = 0; yi < yGuides.length - 1; yi++) {
+        [, y0] = m(xM, yGuides[yi]);
+        [, y1] = m(xM, yGuides[yi + 1]);
+        const dist = Math.hypot(x - x, y1 - y0);
+        const pattern = calculateDottedPattern(dist, lw);
+        ctx.setLineDash(pattern);
+        ctx.beginPath();
+        ctx.moveTo(x, y0);
+        ctx.lineTo(x, y1);
+        ctx.stroke();
+      }
+      
+      // Draw segment from last guide to end
+      [, y0] = m(xM, yGuides[yGuides.length - 1]);
+      [, y1] = m(xM, PW);
+      const distEnd = Math.hypot(x - x, y1 - y0);
+      const patternEnd = calculateDottedPattern(distEnd, lw);
+      ctx.setLineDash(patternEnd);
+      ctx.beginPath();
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x, y1);
+      ctx.stroke();
+    }
+    
+    // Draw horizontal segments
+    for (let yi = 0; yi < yGuides.length; yi++) {
+      const yM = yGuides[yi];
+      const [, y] = m(0, yM);
+      
+      // Draw segment from 0 to first guide
+      let [x0] = m(0, yM);
+      let [x1] = m(xGuides[0], yM);
+      let dist = Math.hypot(x1 - x0, y - y);
+      let pattern = calculateDottedPattern(dist, lw);
+      ctx.setLineDash(pattern);
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+      
+      // Draw segments between guides
+      for (let xi = 0; xi < xGuides.length - 1; xi++) {
+        [x0] = m(xGuides[xi], yM);
+        [x1] = m(xGuides[xi + 1], yM);
+        dist = Math.hypot(x1 - x0, y - y);
+        pattern = calculateDottedPattern(dist, lw);
+        ctx.setLineDash(pattern);
+        ctx.beginPath();
+        ctx.moveTo(x0, y);
+        ctx.lineTo(x1, y);
+        ctx.stroke();
+      }
+      
+      // Draw segment from last guide to end
+      [x0] = m(xGuides[xGuides.length - 1], yM);
+      [x1] = m(PL, yM);
+      dist = Math.hypot(x1 - x0, y - y);
+      pattern = calculateDottedPattern(dist, lw);
+      ctx.setLineDash(pattern);
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+    }
+
+    // Overlay intersection dots explicitly
+    const dotR = Math.max(1.5, lw * 0.65);
+    ctx.setLineDash([]);
+    for (const xM of xGuides) {
+      for (const yM of yGuides) {
+        const [ix, iy] = m(xM, yM);
+        filledCircle(ctx, ix, iy, dotR, lineColor);
+      }
+    }
+  } else {
+    // Dashed mode: draw continuous lines with standard dash
+    const dashOn = Math.max(8, r.w / 95);
+    const dashOff = Math.max(6, r.w / 130);
+    ctx.setLineDash([dashOn, dashOff]);
+    
+    for (const xM of xGuides) {
+      const [x, y0] = m(xM, 0);
+      const [, y1] = m(xM, PW);
+      ctx.beginPath();
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x, y1);
+      ctx.stroke();
+    }
+
+    for (const yM of yGuides) {
+      const [x0, y] = m(0, yM);
+      const [x1] = m(PL, yM);
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+// Helper function to calculate dash pattern that will align dots with segment length
+function calculateDottedPattern(segmentLength: number, lineWidth: number): number[] {
+  if (segmentLength <= 0) return [0.01, 15];
+  
+  // Medium spacing for a balanced number of dots
+  const dotSize = 0.5; // tiny mark
+  const spacing = Math.max(12, lineWidth * 4); // medium gap between dots
+  
+  // Calculate how many dots should fit in this segment
+  const dotSpacing = dotSize + spacing;
+  const numDots = Math.max(1, Math.round(segmentLength / dotSpacing));
+  const adjustedSpacing = segmentLength / numDots;
+  
+  return [dotSize, adjustedSpacing - dotSize];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -713,6 +967,268 @@ export function renderPlayupMap(
     ['AAA', String(behindCount)],
     ['Passers', String(uniquePassers)],
     ['Receivers', String(uniqueReceivers)],
+  ];
+
+  const statSpacing = W / (stats.length + 1);
+  for (let i = 0; i < stats.length; i++) {
+    const xPos = statSpacing * (i + 1);
+    plainText(ctx, stats[i][1], xPos, statsY, tc, 56, {
+      weight: 'bold',
+      align: 'center',
+    });
+    plainText(ctx, stats[i][0], xPos, statsY + 68, SHOT_GREY, 28, {
+      align: 'center',
+    });
+  }
+}
+
+export function renderDriveSlipMap(
+  canvas: HTMLCanvasElement,
+  events: GraphicEvent[],
+  options: DriveSlipMapOptions,
+): void {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const W = PLAYUP_CANVAS_W;
+  const H = PLAYUP_CANVAS_H;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+
+  const bg = SHOT_BG;
+  const tc = options.teamColor || '#5B21B6';
+  const fc = SHOT_TEXT;
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const rawDriveEvents = events.filter(e => ['drive', 'slip'].includes(e.eventType.toLowerCase()));
+  const receiverMap = new Map<string, string>();
+  events
+    .filter(e => e.eventType.toLowerCase() === 'slip received')
+    .forEach(e => {
+      const key = `${(e.driveStartX ?? -1).toFixed(2)},${(e.driveStartY ?? -1).toFixed(2)},${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`;
+      receiverMap.set(key, e.playerName);
+    });
+
+  const drives = rawDriveEvents.map(ev => {
+    const origKey = `${(ev.driveStartX ?? -1).toFixed(2)},${(ev.driveStartY ?? -1).toFixed(2)},${ev.startX.toFixed(2)},${ev.startY.toFixed(2)},${ev.endX.toFixed(2)},${ev.endY.toFixed(2)}`;
+    if (ev.endX < ev.startX) {
+      const mirrored = {
+        ...ev,
+        driveStartX: ev.driveStartX !== undefined ? 100 - ev.driveStartX : undefined,
+        driveStartY: ev.driveStartY !== undefined ? 100 - ev.driveStartY : undefined,
+        startX: 100 - ev.startX,
+        startY: 100 - ev.startY,
+        endX: 100 - ev.endX,
+        endY: 100 - ev.endY,
+      };
+      const receiver = receiverMap.get(origKey);
+      if (receiver) {
+        const mirroredKey = `${(mirrored.driveStartX ?? -1).toFixed(2)},${(mirrored.driveStartY ?? -1).toFixed(2)},${mirrored.startX.toFixed(2)},${mirrored.startY.toFixed(2)},${mirrored.endX.toFixed(2)},${mirrored.endY.toFixed(2)}`;
+        receiverMap.set(mirroredKey, receiver);
+      }
+      return mirrored;
+    }
+    return ev;
+  });
+
+  const titleY = 50;
+  plainText(ctx, options.teamName, W / 2, titleY, tc, 64, {
+    weight: 'bold',
+    align: 'center',
+  });
+  plainText(ctx, `${options.subtitle}`, W / 2, titleY + 76, fc, 36, {
+    weight: 'bold',
+    align: 'center',
+  });
+
+  const dribbleColor = adjustColor(tc, 0, 0.25);
+  const passColor = tc;
+  const receiverColor = adjustColor(tc, 0, 0.1);
+
+  const legendY = 195;
+  let lx = W * 0.12;
+  ctx.save();
+  ctx.setLineDash([14, 10]);
+  line(ctx, lx, legendY + 6, lx + 36, legendY + 6, dribbleColor, 4);
+  ctx.restore();
+  plainText(ctx, 'Dribble (dashed)', lx + 48, legendY - 8, fc, 24);
+  lx += ctx.measureText('Dribble (dashed)').width + 100;
+
+  line(ctx, lx, legendY + 6, lx + 36, legendY + 6, passColor, 4);
+  plainText(ctx, 'Pass (solid)', lx + 48, legendY - 8, fc, 24);
+  lx += ctx.measureText('Pass (solid)').width + 90;
+
+  diamond(ctx, lx, legendY + 6, 10, receiverColor, fc, 2);
+  plainText(ctx, 'Receiver', lx + 24, legendY - 8, fc, 24);
+
+  const dirX0 = W * 0.88;
+  const dirX1 = W * 0.90;
+  drawArrow(ctx, dirX0 - 40, legendY + 6, dirX1, legendY + 6, SHOT_GREY, 2.4, 14);
+  plainText(ctx, 'Attack', dirX0, legendY + 22, SHOT_GREY, 20, { align: 'center' });
+
+  const pitchAspect = PL / PW;
+  const pitchPadX = 100;
+  const pitchPadTop = 250;
+  const pitchPadBot = 200;
+  const availW = W - pitchPadX * 2;
+  const availH = H - pitchPadTop - pitchPadBot;
+  let pitchW: number, pitchH: number;
+  if (availW / pitchAspect <= availH) {
+    pitchW = availW;
+    pitchH = availW / pitchAspect;
+  } else {
+    pitchH = availH;
+    pitchW = availH * pitchAspect;
+  }
+  const pitchRect: Rect = {
+    x: (W - pitchW) / 2,
+    y: pitchPadTop,
+    w: pitchW,
+    h: pitchH,
+  };
+  drawFullPitch(ctx, pitchRect, bg, fc);
+
+  for (const ev of drives) {
+    const dribbleStartX = ev.driveStartX ?? ev.startX;
+    const dribbleStartY = ev.driveStartY ?? ev.startY;
+    const [dx0, dy0] = optaFull(dribbleStartX, dribbleStartY, pitchRect);
+    const [dx1, dy1] = optaFull(ev.startX, ev.startY, pitchRect);
+    const [px1, py1] = optaFull(ev.endX, ev.endY, pitchRect);
+
+    ctx.save();
+    ctx.setLineDash([14, 10]);
+    line(ctx, dx0, dy0, dx1, dy1, dribbleColor, 3.2);
+    ctx.restore();
+
+    drawArrow(ctx, dx1, dy1, px1, py1, passColor, 3.6, 16);
+
+    filledCircle(ctx, dx0, dy0, 8, dribbleColor, fc, 2);
+    filledCircle(ctx, dx1, dy1, 7, passColor, fc, 2);
+    diamond(ctx, px1, py1, 10, receiverColor, fc, 2);
+  }
+
+  // Collision-aware player labels (same strategy as playup map).
+  const LABEL_FONT = 20;
+  const LABEL_PAD = 4;
+  ctx.font = `bold ${LABEL_FONT}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+
+  interface LabelRect { x: number; y: number; w: number; h: number }
+  const placed: LabelRect[] = [];
+
+  function rectsOverlap(a: LabelRect, b: LabelRect): boolean {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function overlapArea(a: LabelRect, b: LabelRect): number {
+    const ox = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+    const oy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    return ox * oy;
+  }
+
+  function totalOverlap(r: LabelRect): number {
+    let sum = 0;
+    for (const p of placed) {
+      if (rectsOverlap(r, p)) sum += overlapArea(r, p);
+    }
+    return sum;
+  }
+
+  const dribblerOffsets: [number, number, CanvasTextAlign][] = [
+    [-14, 14, 'right'],
+    [14, -24, 'left'],
+    [-14, -24, 'right'],
+    [14, 14, 'left'],
+    [-14, 34, 'right'],
+    [14, 34, 'left'],
+    [-14, -44, 'right'],
+    [14, -44, 'left'],
+  ];
+
+  const receiverOffsets: [number, number, CanvasTextAlign][] = [
+    [16, -8, 'left'],
+    [-16, -8, 'right'],
+    [16, -28, 'left'],
+    [-16, -28, 'right'],
+    [16, 16, 'left'],
+    [-16, 16, 'right'],
+    [16, -48, 'left'],
+    [16, 36, 'left'],
+  ];
+
+  function placeLabel(
+    text: string,
+    anchorX: number, anchorY: number,
+    candidates: [number, number, CanvasTextAlign][],
+  ): { x: number; y: number; align: CanvasTextAlign } {
+    const tw = ctx.measureText(text).width;
+    const th = LABEL_FONT;
+
+    let best = candidates[0];
+    let bestOverlap = Infinity;
+
+    for (const [dx, dy, align] of candidates) {
+      const lx = align === 'right' ? anchorX + dx - tw : anchorX + dx;
+      const ly = anchorY + dy;
+      const rect: LabelRect = {
+        x: lx - LABEL_PAD, y: ly - LABEL_PAD,
+        w: tw + LABEL_PAD * 2, h: th + LABEL_PAD * 2,
+      };
+      const ov = totalOverlap(rect);
+      if (ov === 0) {
+        placed.push(rect);
+        return { x: anchorX + dx, y: anchorY + dy, align };
+      }
+      if (ov < bestOverlap) {
+        bestOverlap = ov;
+        best = [dx, dy, align];
+      }
+    }
+
+    const [dx, dy, align] = best;
+    const lx = align === 'right' ? anchorX + dx - tw : anchorX + dx;
+    placed.push({
+      x: lx - LABEL_PAD, y: anchorY + dy - LABEL_PAD,
+      w: tw + LABEL_PAD * 2, h: LABEL_FONT + LABEL_PAD * 2,
+    });
+    return { x: anchorX + dx, y: anchorY + dy, align };
+  }
+
+  for (const ev of drives) {
+    const [sx, sy] = optaFull(ev.startX, ev.startY, pitchRect);
+    const pos = placeLabel(ev.playerName, sx, sy, dribblerOffsets);
+    outlinedText(ctx, ev.playerName, pos.x, pos.y, fc, bg, LABEL_FONT, {
+      weight: 'bold',
+      align: pos.align,
+      outlineWidth: 5,
+    });
+  }
+
+  for (const ev of drives) {
+    const [ex, ey] = optaFull(ev.endX, ev.endY, pitchRect);
+    const key = `${(ev.driveStartX ?? -1).toFixed(2)},${(ev.driveStartY ?? -1).toFixed(2)},${ev.startX.toFixed(2)},${ev.startY.toFixed(2)},${ev.endX.toFixed(2)},${ev.endY.toFixed(2)}`;
+    const receiver = receiverMap.get(key) || '';
+    if (receiver) {
+      const pos = placeLabel(receiver, ex, ey, receiverOffsets);
+      outlinedText(ctx, receiver, pos.x, pos.y, fc, bg, LABEL_FONT, {
+        weight: 'bold',
+        align: pos.align,
+        outlineWidth: 5,
+      });
+    }
+  }
+
+  const driveCount = drives.length;
+  const receiveCount = events.filter(e => e.eventType.toLowerCase() === 'slip received').length;
+  const uniqueDribblers = new Set(drives.map(d => d.playerName)).size;
+
+  const statsY = pitchRect.y + pitchRect.h + 50;
+  const stats = [
+    ['Drive + Slip', String(driveCount)],
+    ['Slip Received', String(receiveCount)],
+    ['Dribblers', String(uniqueDribblers)],
   ];
 
   const statSpacing = W / (stats.length + 1);
@@ -1127,6 +1643,341 @@ export function renderDefensiveHeatmap(
       align: 'center',
     });
     plainText(ctx, heatStats[i][0], xPos, statsY + 68, SHOT_GREY, 28, {
+      align: 'center',
+    });
+  }
+}
+
+/**
+ * Render a heatmap showing spatial density of Mid Recovery events.
+ * Includes dotted tactical guides for pitch thirds and penalty-box edge lanes.
+ */
+export function renderMidRecoveriesHeatmap(
+  canvas: HTMLCanvasElement,
+  events: GraphicEvent[],
+  options: MidRecoveriesOptions,
+): void {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const W = HEATMAP_CANVAS_W;
+  const H = HEATMAP_CANVAS_H;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+
+  const bg = SHOT_BG;
+  const tc = options.teamColor || '#001E44';
+  const fc = SHOT_TEXT;
+
+  const tcR = parseInt(tc.slice(1, 3), 16);
+  const tcG = parseInt(tc.slice(3, 5), 16);
+  const tcB = parseInt(tc.slice(5, 7), 16);
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const recoveryEvents = events.filter(e => e.eventType.toLowerCase() === 'mid recovery');
+
+  const titleY = 50;
+  plainText(ctx, options.teamName, W / 2, titleY, tc, 64, {
+    weight: 'bold',
+    align: 'center',
+  });
+  plainText(ctx, options.subtitle || 'Mid Recoveries', W / 2, titleY + 76, fc, 36, {
+    weight: 'bold',
+    align: 'center',
+  });
+
+  const legendY = 195;
+
+  let lx = W * 0.12;
+  filledCircle(ctx, lx, legendY + 6, 12, tc, fc, 2);
+  plainText(ctx, `Mid Recoveries (${recoveryEvents.length})`, lx + 24, legendY - 8, fc, 26);
+
+  const gradX = W * 0.72;
+  const gradW = W * 0.18;
+  const gradH2 = 20;
+  const gradY = legendY - 4;
+  const hGrad = ctx.createLinearGradient(gradX, 0, gradX + gradW, 0);
+  hGrad.addColorStop(0, `rgba(${tcR}, ${tcG}, ${tcB}, 0.05)`);
+  hGrad.addColorStop(0.5, `rgba(${tcR}, ${tcG}, ${tcB}, 0.35)`);
+  hGrad.addColorStop(1, `rgba(${tcR}, ${tcG}, ${tcB}, 0.85)`);
+  ctx.fillStyle = hGrad;
+  ctx.fillRect(gradX, gradY, gradW, gradH2);
+  ctx.strokeStyle = SHOT_GREY;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(gradX, gradY, gradW, gradH2);
+  plainText(ctx, 'Low', gradX - 8, gradY - 2, SHOT_GREY, 20, { align: 'right' });
+  plainText(ctx, 'High', gradX + gradW + 8, gradY - 2, SHOT_GREY, 20);
+
+  const pitchAspect = PL / PW;
+  const pitchPadX = 100;
+  const pitchPadTop = 250;
+  const pitchPadBot = 200;
+  const availW = W - pitchPadX * 2;
+  const availH = H - pitchPadTop - pitchPadBot;
+  let pitchW: number, pitchH: number;
+  if (availW / pitchAspect <= availH) {
+    pitchW = availW;
+    pitchH = availW / pitchAspect;
+  } else {
+    pitchH = availH;
+    pitchW = availH * pitchAspect;
+  }
+  const pitchRect: Rect = {
+    x: (W - pitchW) / 2,
+    y: pitchPadTop,
+    w: pitchW,
+    h: pitchH,
+  };
+  drawFullPitch(ctx, pitchRect, bg, fc);
+
+  if (recoveryEvents.length > 0) {
+    const GRID_W = 480;
+    const GRID_H = 320;
+    const sigma = 24;
+    const sigma2 = sigma * sigma;
+    const kernelRadius = Math.ceil(sigma * 3);
+
+    const density = new Float64Array(GRID_W * GRID_H);
+    for (const ev of recoveryEvents) {
+      const gx = (ev.startX / 100) * (GRID_W - 1);
+      const gy = (ev.startY / 100) * (GRID_H - 1);
+
+      const x0 = Math.max(0, Math.floor(gx - kernelRadius));
+      const x1 = Math.min(GRID_W - 1, Math.ceil(gx + kernelRadius));
+      const y0 = Math.max(0, Math.floor(gy - kernelRadius));
+      const y1 = Math.min(GRID_H - 1, Math.ceil(gy + kernelRadius));
+
+      for (let yi = y0; yi <= y1; yi++) {
+        for (let xi = x0; xi <= x1; xi++) {
+          const dx = xi - gx;
+          const dy = yi - gy;
+          const w = Math.exp(-(dx * dx + dy * dy) / (2 * sigma2));
+          density[yi * GRID_W + xi] += w;
+        }
+      }
+    }
+
+    let maxD = 0;
+    for (let i = 0; i < density.length; i++) {
+      if (density[i] > maxD) maxD = density[i];
+    }
+
+    const heatCanvas = document.createElement('canvas');
+    heatCanvas.width = GRID_W;
+    heatCanvas.height = GRID_H;
+    const hctx = heatCanvas.getContext('2d')!;
+    const imgData = hctx.createImageData(GRID_W, GRID_H);
+
+    for (let i = 0; i < density.length; i++) {
+      const t = maxD > 0 ? density[i] / maxD : 0;
+      const idx = i * 4;
+      if (t < 0.02) {
+        imgData.data[idx] = 0;
+        imgData.data[idx + 1] = 0;
+        imgData.data[idx + 2] = 0;
+        imgData.data[idx + 3] = 0;
+      } else {
+        imgData.data[idx] = tcR;
+        imgData.data[idx + 1] = tcG;
+        imgData.data[idx + 2] = tcB;
+        imgData.data[idx + 3] = Math.round(15 + 210 * t);
+      }
+    }
+    hctx.putImageData(imgData, 0, 0);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(pitchRect.x, pitchRect.y, pitchRect.w, pitchRect.h);
+    ctx.clip();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(heatCanvas, pitchRect.x, pitchRect.y, pitchRect.w, pitchRect.h);
+    ctx.restore();
+
+    drawFullPitch(ctx, pitchRect, 'transparent', fc);
+  }
+
+  if (options.showGuides ?? true) {
+    drawFullPitchGuides(ctx, pitchRect, {
+      lineColor: options.guideColor ?? SHOT_GREY,
+      style: options.guideStyle ?? 'dotted',
+      lineWidth: options.guideWidth,
+      showThirds: options.showThirdsGuides ?? true,
+      showPenaltyLanes: options.showPenaltyLaneGuides ?? true,
+    });
+  }
+
+  for (const ev of recoveryEvents) {
+    const [px, py] = optaFull(ev.startX, ev.startY, pitchRect);
+    filledCircle(ctx, px, py, 8, tc, '#FFFFFF', 2);
+
+    if (options.showPlayerNames ?? false) {
+      outlinedText(ctx, ev.playerName, px + 12, py - 18, fc, bg, 18, {
+        weight: 'bold',
+        align: 'left',
+        outlineWidth: 4,
+      });
+    }
+  }
+
+  const statsY = pitchRect.y + pitchRect.h + 50;
+  const stats = [
+    ['Mid Recoveries', String(recoveryEvents.length)],
+    ['Players', String(new Set(recoveryEvents.map(e => e.playerName)).size)],
+  ];
+
+  const statSpacing = W / (stats.length + 1);
+  for (let i = 0; i < stats.length; i++) {
+    const xPos = statSpacing * (i + 1);
+    plainText(ctx, stats[i][1], xPos, statsY, tc, 56, {
+      weight: 'bold',
+      align: 'center',
+    });
+    plainText(ctx, stats[i][0], xPos, statsY + 68, SHOT_GREY, 28, {
+      align: 'center',
+    });
+  }
+}
+
+/**
+ * Render First + Second Ball events on a full pitch with tactical dashed guides.
+ */
+export function renderFirstSecondBallMap(
+  canvas: HTMLCanvasElement,
+  events: GraphicEvent[],
+  options: FirstSecondBallMapOptions,
+): void {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const W = HEATMAP_CANVAS_W;
+  const H = HEATMAP_CANVAS_H;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+
+  const bg = SHOT_BG;
+  const fc = SHOT_TEXT;
+  const team1Color = options.team1Color || '#001E44';
+  const team2Color = options.team2Color || '#C41E3A';
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const firstBalls = events.filter(e => e.eventType.toLowerCase() === 'first ball');
+  const secondBalls = events.filter(e => e.eventType.toLowerCase() === 'second ball');
+  const ballEvents = events.filter(e => {
+    const t = e.eventType.toLowerCase();
+    return t === 'first ball' || t === 'second ball';
+  });
+
+  const uniqueTeams = [...new Set(ballEvents.map(e => String(e.playerTeam)))].filter(Boolean);
+  const team1Id = options.team1Id || uniqueTeams[0] || '1';
+  const team2Id = options.team2Id || uniqueTeams.find(t => t !== team1Id) || uniqueTeams[1] || '2';
+  const teamColorById = new Map<string, string>();
+  const teamLabelById = new Map<string, string>();
+  teamColorById.set(team1Id, team1Color);
+  teamColorById.set(team2Id, team2Color);
+  teamLabelById.set(team1Id, options.team1Name || team1Id);
+  teamLabelById.set(team2Id, options.team2Name || team2Id);
+  const colorForTeam = (teamId: string | number): string => teamColorById.get(String(teamId)) ?? team1Color;
+  const labelForTeam = (teamId: string): string => teamLabelById.get(teamId) ?? teamId;
+
+  const titleY = 50;
+  plainText(ctx, options.teamName, W / 2, titleY, fc, 64, {
+    weight: 'bold',
+    align: 'center',
+  });
+  plainText(ctx, options.subtitle || 'First + Second Ball Map', W / 2, titleY + 76, fc, 36, {
+    weight: 'bold',
+    align: 'center',
+  });
+
+  const legendY = 195;
+  let lx = W * 0.12;
+  if (ballEvents.some(e => String(e.playerTeam) === team1Id)) {
+    filledCircle(ctx, lx, legendY + 6, 12, team1Color, fc, 2);
+    plainText(ctx, labelForTeam(team1Id), lx + 24, legendY - 8, fc, 26);
+    lx += ctx.measureText(labelForTeam(team1Id)).width + 80;
+  }
+  if (ballEvents.some(e => String(e.playerTeam) === team2Id)) {
+    filledCircle(ctx, lx, legendY + 6, 12, team2Color, fc, 2);
+    plainText(ctx, labelForTeam(team2Id), lx + 24, legendY - 8, fc, 26);
+    lx += ctx.measureText(labelForTeam(team2Id)).width + 80;
+  }
+
+  // Shape legend (event type is shape, not colour).
+  filledCircle(ctx, lx, legendY + 6, 10, fc, bg, 2);
+  plainText(ctx, `First Ball (${firstBalls.length})`, lx + 22, legendY - 8, fc, 24);
+  lx += ctx.measureText(`First Ball (${firstBalls.length})`).width + 72;
+  diamond(ctx, lx, legendY + 6, 9, fc, bg, 2);
+  plainText(ctx, `Second Ball (${secondBalls.length})`, lx + 22, legendY - 8, fc, 24);
+
+  const pitchAspect = PL / PW;
+  const pitchPadX = 100;
+  const pitchPadTop = 250;
+  const pitchPadBot = 200;
+  const availW = W - pitchPadX * 2;
+  const availH = H - pitchPadTop - pitchPadBot;
+  let pitchW: number, pitchH: number;
+  if (availW / pitchAspect <= availH) {
+    pitchW = availW;
+    pitchH = availW / pitchAspect;
+  } else {
+    pitchH = availH;
+    pitchW = availH * pitchAspect;
+  }
+  const pitchRect: Rect = {
+    x: (W - pitchW) / 2,
+    y: pitchPadTop,
+    w: pitchW,
+    h: pitchH,
+  };
+
+  drawFullPitch(ctx, pitchRect, bg, fc);
+  draw18ZoneGrid(ctx, pitchRect, SHOT_GREY, options.gridStyle ?? 'dotted');
+  // Redraw field markings above guides to ensure perfect visual lock with official lines.
+  drawFullPitch(ctx, pitchRect, 'transparent', fc);
+
+  for (const ev of firstBalls) {
+    const [px, py] = optaFull(ev.startX, ev.startY, pitchRect);
+    filledCircle(ctx, px, py, 9, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
+  }
+  for (const ev of secondBalls) {
+    const [px, py] = optaFull(ev.startX, ev.startY, pitchRect);
+    diamond(ctx, px, py, 9, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
+  }
+
+  const statsY = pitchRect.y + pitchRect.h + 50;
+  const t1Id = team1Id;
+  const t2Id = team2Id;
+  const t1Label = labelForTeam(t1Id);
+  const t2Label = labelForTeam(t2Id);
+
+  const t1First = firstBalls.filter(e => String(e.playerTeam) === t1Id).length;
+  const t2First = firstBalls.filter(e => String(e.playerTeam) === t2Id).length;
+  const t1Second = secondBalls.filter(e => String(e.playerTeam) === t1Id).length;
+  const t2Second = secondBalls.filter(e => String(e.playerTeam) === t2Id).length;
+
+  const pct = (n: number, d: number) => (d > 0 ? ((n / d) * 100).toFixed(1) : '0.0');
+  const stats = [
+    [`${t1Label} won % of First Balls`, `${pct(t1First, firstBalls.length)}%`],
+    [`${t2Label} won % of First Balls`, `${pct(t2First, firstBalls.length)}%`],
+    [`${t1Label} won % of Second Balls`, `${pct(t1Second, secondBalls.length)}%`],
+    [`${t2Label} won % of Second Balls`, `${pct(t2Second, secondBalls.length)}%`],
+  ];
+
+  const statSpacing = W / (stats.length + 1);
+  for (let i = 0; i < stats.length; i++) {
+    const xPos = statSpacing * (i + 1);
+    plainText(ctx, stats[i][1], xPos, statsY, fc, 52, {
+      weight: 'bold',
+      align: 'center',
+    });
+    plainText(ctx, stats[i][0], xPos, statsY + 66, SHOT_GREY, 24, {
       align: 'center',
     });
   }
