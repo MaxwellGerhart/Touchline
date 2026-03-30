@@ -9,6 +9,7 @@ export function VideoPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [sourceType, setSourceType] = useState<'local' | 'youtube' | null>(null);
   const [showSourceMenu, setShowSourceMenu] = useState(false);
   const [youtubeUrl, setYoutubeUrl] = useState('');
@@ -44,6 +45,15 @@ export function VideoPlayer() {
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
       setDuration(videoRef.current.duration);
+      videoRef.current.playbackRate = playbackRate;
+    }
+  };
+
+  const handlePlaybackRateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const rate = Math.min(4, Math.max(0.25, Number(e.target.value)));
+    setPlaybackRate(rate);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = rate;
     }
   };
 
@@ -105,6 +115,7 @@ export function VideoPlayer() {
     setYoutubeUrl('');
     setIsPlaying(false);
     setDuration(0);
+    setPlaybackRate(1);
     setShowSourceMenu(false);
   };
 
@@ -246,6 +257,18 @@ export function VideoPlayer() {
                   <Volume2 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                 )}
               </button>
+              <select
+                value={playbackRate}
+                onChange={handlePlaybackRateChange}
+                className="ml-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs"
+                aria-label="Playback speed"
+              >
+                {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].map((rate) => (
+                  <option key={rate} value={rate}>
+                    {rate}x
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="text-sm font-mono font-semibold text-navy dark:text-white">

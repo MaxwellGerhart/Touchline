@@ -382,7 +382,7 @@ export function EventRecordingPanel() {
             {playerDisplayMode === 'number' ? '#' : playerDisplayMode === 'name' ? 'Aa' : '# Aa'}
           </button>
         </div>
-        <div className="max-h-40 overflow-y-auto flex flex-col gap-2">
+        <div className="overflow-y-auto flex flex-col gap-2">
           {/* Team 1 Grid Row */}
           <div className="flex gap-2 items-start">
             {/* Team 1 Label/Controls */}
