@@ -20,9 +20,12 @@ interface Rect {
 
 export interface GraphicEvent {
   eventType: string;
+  playerId?: number;
   playerName: string;
   playerTeam: string | number;
   videoTimestamp?: number;
+  sequenceId?: string;
+  parentEventId?: string;
   driveStartX?: number;
   driveStartY?: number;
   startX: number; // opta 0-100
@@ -41,6 +44,21 @@ export interface DriveSlipMapOptions {
   teamName: string;
   subtitle: string;
   teamColor: string;
+}
+
+export type EventSequenceLineStyle = 'solid' | 'dashed' | 'dotted';
+
+export interface EventSequenceStyle {
+  color: string;
+  lineStyle: EventSequenceLineStyle;
+  lineWidth: number;
+}
+
+export interface EventSequenceMapOptions {
+  teamName: string;
+  subtitle: string;
+  teamColor: string;
+  eventStyles: Record<string, EventSequenceStyle>;
 }
 
 export interface ShotMapOptions {
@@ -79,6 +97,9 @@ export interface FirstSecondBallMapOptions {
   team1Color: string;
   team2Color: string;
   gridStyle?: 'dotted' | 'dashed';
+  showThirds?: boolean;
+  showAttackingDirection?: boolean;
+  applyJitterToDense?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -432,8 +453,11 @@ function drawFullPitchGuides(
   // Horizontal guides from the 18-yard box edges.
   if (showPenaltyLanes) {
     for (const yM of [PA_Y0, PA_Y1]) {
-      const [x0, y] = m(0, yM);
-      const [x1] = m(PL, yM);
+      const [, y] = m(0, yM);
+      
+      // Middle section: from penalty box edge to penalty box edge (skip the boxes)
+      const [x0] = m(PA_DEPTH, yM);
+      const [x1] = m(PL - PA_DEPTH, yM);
       ctx.beginPath();
       ctx.moveTo(x0, y);
       ctx.lineTo(x1, y);
@@ -1244,6 +1268,287 @@ export function renderDriveSlipMap(
   }
 }
 
+export function renderEventSequenceMap(
+  canvas: HTMLCanvasElement,
+  events: GraphicEvent[],
+  options: EventSequenceMapOptions,
+): void {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const W = PLAYUP_CANVAS_W;
+  const H = PLAYUP_CANVAS_H;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+
+  const bg = SHOT_BG;
+  const tc = options.teamColor || '#001E44';
+  const fc = SHOT_TEXT;
+
+  const directionalEvents = events.filter(e => !(e.endX === 0 && e.endY === 0));
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const titleY = 50;
+  plainText(ctx, options.teamName, W / 2, titleY, tc, 64, {
+    weight: 'bold',
+    align: 'center',
+  });
+  plainText(ctx, `${options.subtitle}`, W / 2, titleY + 76, fc, 36, {
+    weight: 'bold',
+    align: 'center',
+  });
+
+  const typeCounts = new Map<string, number>();
+  const sequenceMarkerRadius = 24;
+  const renderedSegments: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+
+  for (const ev of directionalEvents) {
+    typeCounts.set(ev.eventType, (typeCounts.get(ev.eventType) || 0) + 1);
+  }
+
+  const firstTouchByPlayer = new Map<string, { x: number; y: number }>();
+  for (const ev of directionalEvents) {
+    if (!ev.playerName || firstTouchByPlayer.has(ev.playerName)) continue;
+    const isReceivedEvent = ev.eventType.toLowerCase().includes('received');
+    const hasValidEnd = !(ev.endX === 0 && ev.endY === 0);
+    firstTouchByPlayer.set(
+      ev.playerName,
+      isReceivedEvent && hasValidEnd
+        ? { x: ev.endX, y: ev.endY }
+        : { x: ev.startX, y: ev.startY },
+    );
+  }
+
+  const legendY = 190;
+  let ly = legendY;
+  const legendMaxWidth = W * 0.84;
+  const legendGap = 18;
+
+  const drawLegendSample = (x: number, y: number, style: EventSequenceStyle) => {
+    ctx.save();
+    if (style.lineStyle === 'dashed') {
+      ctx.setLineDash([12, 8]);
+      ctx.lineCap = 'butt';
+    } else if (style.lineStyle === 'dotted') {
+      ctx.setLineDash([0, Math.max(8, style.lineWidth * 2.2)]);
+      ctx.lineCap = 'round';
+    } else {
+      ctx.setLineDash([]);
+      ctx.lineCap = 'butt';
+    }
+    line(ctx, x, y, x + 34, y, style.color, Math.max(2, style.lineWidth));
+    ctx.restore();
+  };
+
+  const legendItems = [...typeCounts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([eventType, count]) => {
+      const style = options.eventStyles[eventType] ?? {
+        color: tc,
+        lineStyle: 'solid',
+        lineWidth: 6,
+      };
+      const label = `${eventType} (${count})`;
+      ctx.font = `normal 22px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+      const width = ctx.measureText(label).width + 44;
+      return { style, label, width };
+    });
+
+  const rows: Array<Array<(typeof legendItems)[number]>> = [];
+  let currentRow: Array<(typeof legendItems)[number]> = [];
+  let currentRowWidth = 0;
+
+  for (const item of legendItems) {
+    const nextWidth = currentRow.length === 0 ? item.width : currentRowWidth + legendGap + item.width;
+    if (currentRow.length > 0 && nextWidth > legendMaxWidth) {
+      rows.push(currentRow);
+      currentRow = [item];
+      currentRowWidth = item.width;
+    } else {
+      currentRow.push(item);
+      currentRowWidth = nextWidth;
+    }
+  }
+  if (currentRow.length > 0) rows.push(currentRow);
+
+  const pitchAspect = PL / PW;
+  const pitchPadX = 100;
+  const pitchPadTop = 190;
+  const pitchPadBot = 170;
+  const availW = W - pitchPadX * 2;
+  const availH = H - pitchPadTop - pitchPadBot;
+  let pitchW: number, pitchH: number;
+  if (availW / pitchAspect <= availH) {
+    pitchW = availW;
+    pitchH = availW / pitchAspect;
+  } else {
+    pitchH = availH;
+    pitchW = availH * pitchAspect;
+  }
+  const pitchRect: Rect = {
+    x: (W - pitchW) / 2,
+    y: pitchPadTop,
+    w: pitchW,
+    h: pitchH,
+  };
+  drawFullPitch(ctx, pitchRect, bg, fc);
+
+  for (const ev of directionalEvents) {
+    const style = options.eventStyles[ev.eventType] ?? {
+      color: tc,
+      lineStyle: 'solid',
+      lineWidth: 6,
+    };
+    const [sx, sy] = optaFull(ev.startX, ev.startY, pitchRect);
+    const [ex, ey] = optaFull(ev.endX, ev.endY, pitchRect);
+
+    ctx.save();
+    if (style.lineStyle === 'dashed') {
+      ctx.setLineDash([12, 8]);
+      ctx.lineCap = 'butt';
+    } else if (style.lineStyle === 'dotted') {
+      ctx.setLineDash([0, Math.max(8, style.lineWidth * 2.2)]);
+      ctx.lineCap = 'round';
+    } else {
+      ctx.setLineDash([]);
+      ctx.lineCap = 'butt';
+    }
+    line(ctx, sx, sy, ex, ey, style.color, Math.max(2.5, style.lineWidth + 1));
+    renderedSegments.push({ x1: sx, y1: sy, x2: ex, y2: ey });
+    ctx.restore();
+
+    const angle = Math.atan2(ey - sy, ex - sx);
+    const head = 16;
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - head * Math.cos(angle - Math.PI / 6), ey - head * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(ex - head * Math.cos(angle + Math.PI / 6), ey - head * Math.sin(angle + Math.PI / 6));
+    ctx.closePath();
+    ctx.fillStyle = style.color;
+    ctx.fill();
+
+    filledCircle(ctx, sx, sy, sequenceMarkerRadius, style.color, fc, 2.6);
+    if (typeof ev.playerId === 'number') {
+      outlinedText(ctx, String(ev.playerId), sx, sy, '#FFFFFF', '#0F172A', 22, {
+        weight: 'bold',
+        align: 'center',
+        baseline: 'middle',
+        outlineWidth: 3,
+      });
+    }
+  }
+
+  // Label each player once at the first touch point in the sequence.
+  const placedLabelRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+
+  const expandedRect = (rect: { x: number; y: number; w: number; h: number }, pad: number) => ({
+    x: rect.x - pad,
+    y: rect.y - pad,
+    w: rect.w + pad * 2,
+    h: rect.h + pad * 2,
+  });
+
+  const isPointInRect = (px: number, py: number, rect: { x: number; y: number; w: number; h: number }) => {
+    return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
+  };
+
+  const segmentsIntersect = (
+    a1x: number, a1y: number, a2x: number, a2y: number,
+    b1x: number, b1y: number, b2x: number, b2y: number,
+  ) => {
+    const cross = (x1: number, y1: number, x2: number, y2: number) => x1 * y2 - y1 * x2;
+    const rX = a2x - a1x;
+    const rY = a2y - a1y;
+    const sX = b2x - b1x;
+    const sY = b2y - b1y;
+    const denom = cross(rX, rY, sX, sY);
+    if (Math.abs(denom) < 1e-6) return false;
+    const uNum = cross(b1x - a1x, b1y - a1y, rX, rY);
+    const tNum = cross(b1x - a1x, b1y - a1y, sX, sY);
+    const t = tNum / denom;
+    const u = uNum / denom;
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+  };
+
+  const segmentHitsRect = (seg: { x1: number; y1: number; x2: number; y2: number }, rect: { x: number; y: number; w: number; h: number }, pad: number) => {
+    const r = expandedRect(rect, pad);
+    if (isPointInRect(seg.x1, seg.y1, r) || isPointInRect(seg.x2, seg.y2, r)) return true;
+
+    const left = { x1: r.x, y1: r.y, x2: r.x, y2: r.y + r.h };
+    const right = { x1: r.x + r.w, y1: r.y, x2: r.x + r.w, y2: r.y + r.h };
+    const top = { x1: r.x, y1: r.y, x2: r.x + r.w, y2: r.y };
+    const bottom = { x1: r.x, y1: r.y + r.h, x2: r.x + r.w, y2: r.y + r.h };
+
+    return (
+      segmentsIntersect(seg.x1, seg.y1, seg.x2, seg.y2, left.x1, left.y1, left.x2, left.y2) ||
+      segmentsIntersect(seg.x1, seg.y1, seg.x2, seg.y2, right.x1, right.y1, right.x2, right.y2) ||
+      segmentsIntersect(seg.x1, seg.y1, seg.x2, seg.y2, top.x1, top.y1, top.x2, top.y2) ||
+      segmentsIntersect(seg.x1, seg.y1, seg.x2, seg.y2, bottom.x1, bottom.y1, bottom.x2, bottom.y2)
+    );
+  };
+
+  const rectsOverlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }, pad = 6) => {
+    const aa = expandedRect(a, pad);
+    const bb = expandedRect(b, pad);
+    return aa.x < bb.x + bb.w && aa.x + aa.w > bb.x && aa.y < bb.y + bb.h && aa.y + aa.h > bb.y;
+  };
+
+  for (const [playerName, first] of firstTouchByPlayer.entries()) {
+    if (!first) continue;
+    const [anchorX, anchorY] = optaFull(first.x, first.y, pitchRect);
+    ctx.font = `bold 20px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    const labelW = ctx.measureText(playerName).width;
+    const labelH = 24;
+
+    const candidates = [
+      { x: anchorX + sequenceMarkerRadius + 10, y: anchorY - sequenceMarkerRadius - 8 },
+      { x: anchorX + sequenceMarkerRadius + 10, y: anchorY + 8 },
+      { x: anchorX - sequenceMarkerRadius - 10 - labelW, y: anchorY - sequenceMarkerRadius - 8 },
+      { x: anchorX - sequenceMarkerRadius - 10 - labelW, y: anchorY + 8 },
+      { x: anchorX - labelW / 2, y: anchorY - sequenceMarkerRadius - labelH - 8 },
+      { x: anchorX - labelW / 2, y: anchorY + sequenceMarkerRadius + 8 },
+    ];
+
+    let chosen = candidates[0];
+    for (const c of candidates) {
+      const rect = { x: c.x, y: c.y, w: labelW, h: labelH };
+      const overlapsLine = renderedSegments.some(seg => segmentHitsRect(seg, rect, 6));
+      const overlapsLabel = placedLabelRects.some(existing => rectsOverlap(existing, rect));
+      const outOfBounds =
+        rect.x < pitchRect.x + 4 ||
+        rect.y < pitchRect.y + 4 ||
+        rect.x + rect.w > pitchRect.x + pitchRect.w - 4 ||
+        rect.y + rect.h > pitchRect.y + pitchRect.h - 4;
+      if (!overlapsLine && !overlapsLabel && !outOfBounds) {
+        chosen = c;
+        break;
+      }
+    }
+
+    const placed = { x: chosen.x, y: chosen.y, w: labelW, h: labelH };
+    placedLabelRects.push(placed);
+    plainText(ctx, playerName, chosen.x, chosen.y, fc, 20, {
+      weight: 'bold',
+    });
+  }
+
+  const bottomLegendTop = pitchRect.y + pitchRect.h + 48;
+  ly = bottomLegendTop;
+  for (const row of rows) {
+    const rowWidth = row.reduce((sum, item) => sum + item.width, 0) + legendGap * Math.max(0, row.length - 1);
+    let lx = (W - rowWidth) / 2;
+    for (const item of row) {
+      drawLegendSample(lx, ly + 4, item.style);
+      plainText(ctx, item.label, lx + 44, ly - 8, fc, 22);
+      lx += item.width + legendGap;
+    }
+    ly += 34;
+  }
+}
+
 /** Shift a hex colour's hue and lighten it. */
 function adjustColor(hex: string, hueDeg: number, lighten: number): string {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
@@ -1736,7 +2041,7 @@ export function renderMidRecoveriesHeatmap(
   if (recoveryEvents.length > 0) {
     const GRID_W = 480;
     const GRID_H = 320;
-    const sigma = 24;
+    const sigma = 38;
     const sigma2 = sigma * sigma;
     const kernelRadius = Math.ceil(sigma * 3);
 
@@ -1774,17 +2079,10 @@ export function renderMidRecoveriesHeatmap(
     for (let i = 0; i < density.length; i++) {
       const t = maxD > 0 ? density[i] / maxD : 0;
       const idx = i * 4;
-      if (t < 0.02) {
-        imgData.data[idx] = 0;
-        imgData.data[idx + 1] = 0;
-        imgData.data[idx + 2] = 0;
-        imgData.data[idx + 3] = 0;
-      } else {
-        imgData.data[idx] = tcR;
-        imgData.data[idx + 1] = tcG;
-        imgData.data[idx + 2] = tcB;
-        imgData.data[idx + 3] = Math.round(15 + 210 * t);
-      }
+      imgData.data[idx] = tcR;
+      imgData.data[idx + 1] = tcG;
+      imgData.data[idx + 2] = tcB;
+      imgData.data[idx + 3] = Math.round(200 * Math.pow(t, 1.2));
     }
     hctx.putImageData(imgData, 0, 0);
 
@@ -1794,6 +2092,7 @@ export function renderMidRecoveriesHeatmap(
     ctx.clip();
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
+    ctx.filter = 'blur(4px)';
     ctx.drawImage(heatCanvas, pitchRect.x, pitchRect.y, pitchRect.w, pitchRect.h);
     ctx.restore();
 
@@ -1824,9 +2123,17 @@ export function renderMidRecoveriesHeatmap(
   }
 
   const statsY = pitchRect.y + pitchRect.h + 50;
+  // Match lane stats to the horizontal guide lines drawn at PA_Y0/PA_Y1.
+  const centralLaneMinOptaY = (PA_Y0 / PW) * 100;
+  const centralLaneMaxOptaY = (PA_Y1 / PW) * 100;
+  const centralRecoveries = recoveryEvents.filter(
+    e => e.startY >= centralLaneMinOptaY && e.startY <= centralLaneMaxOptaY,
+  ).length;
+  const wideRecoveries = recoveryEvents.length - centralRecoveries;
   const stats = [
-    ['Mid Recoveries', String(recoveryEvents.length)],
-    ['Players', String(new Set(recoveryEvents.map(e => e.playerName)).size)],
+    ['Total', String(recoveryEvents.length)],
+    ['Wide', String(wideRecoveries)],
+    ['Central', String(centralRecoveries)],
   ];
 
   const statSpacing = W / (stats.length + 1);
@@ -1842,6 +2149,126 @@ export function renderMidRecoveriesHeatmap(
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  First + Second Ball Map helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Seeded pseudo-random number generator for consistent jitter */
+function seededRandom(seed: number): number {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
+/** Calculate jitter offset for a point to reduce overplotting */
+function calculateJitter(
+  x: number, y: number, radius: number,
+  denseRadius: number,
+  nearby: { x: number; y: number }[],
+): { jx: number; jy: number; applied: boolean } {
+  // Check if this point has overlapping neighbors
+  const overlappingCount = nearby.filter(
+    p => Math.hypot(p.x - x, p.y - y) < denseRadius
+  ).length;
+
+  if (overlappingCount < 2) {
+    // Not dense enough to jitter
+    return { jx: 0, jy: 0, applied: false };
+  }
+
+  // Create a pseudo-random position based on point location
+  const seed1 = x * 73856093 ^ y * 19349663;
+  const seed2 = seed1 * 83492791;
+  const angle = seededRandom(seed1) * Math.PI * 2;
+  const dist = seededRandom(seed2) * radius * 0.4;
+
+  return {
+    jx: Math.cos(angle) * dist,
+    jy: Math.sin(angle) * dist,
+    applied: true,
+  };
+}
+
+/** Detect zones with high event density and return their bounds */
+function matchFirstSecondBalls(
+  firstBalls: GraphicEvent[],
+  secondBalls: GraphicEvent[],
+): Array<{ first: GraphicEvent; second: GraphicEvent }> {
+  const pairs: Array<{ first: GraphicEvent; second: GraphicEvent }> = [];
+  const usedSecondIndices = new Set<number>();
+
+  for (const fb of firstBalls) {
+    // Try to match by sequenceId first
+    if (fb.sequenceId) {
+      const sbIdx = secondBalls.findIndex(sb => sb.sequenceId === fb.sequenceId);
+      if (sbIdx >= 0 && !usedSecondIndices.has(sbIdx)) {
+        pairs.push({ first: fb, second: secondBalls[sbIdx] });
+        usedSecondIndices.add(sbIdx);
+        continue;
+      }
+    }
+
+    // Fall back to nearest spatial match
+    let closestIdx = -1;
+    let closestDist = Infinity;
+    for (let i = 0; i < secondBalls.length; i++) {
+      if (usedSecondIndices.has(i)) continue;
+      const sb = secondBalls[i];
+      const dist = Math.hypot(sb.startX - fb.startX, sb.startY - fb.startY);
+      if (dist < closestDist && dist < 20) {
+        // Within 20% of pitch
+        closestDist = dist;
+        closestIdx = i;
+      }
+    }
+
+    if (closestIdx >= 0) {
+      pairs.push({ first: firstBalls[firstBalls.indexOf(fb)], second: secondBalls[closestIdx] });
+      usedSecondIndices.add(closestIdx);
+    }
+  }
+
+  return pairs;
+}
+
+/** Draw arrow indicator showing attacking direction */
+function drawAttackingDirectionIndicator(
+  ctx: CanvasRenderingContext2D,
+  pitchRect: Rect,
+  team1Label: string,
+  team2Label: string,
+  textColor: string,
+) {
+  // Center both direction labels on their own row between legend and pitch.
+  const centerX = pitchRect.x + pitchRect.w / 2;
+  const fontSize = 24;
+  const yText = pitchRect.y - 44;
+
+  const leftText = `< ${team2Label} attacks`;
+  const rightText = `${team1Label} attacks >`;
+
+  // Measure text to guarantee adequate separation regardless of team-name length.
+  ctx.save();
+  ctx.font = `normal ${fontSize}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  const leftWidth = ctx.measureText(leftText).width;
+  const rightWidth = ctx.measureText(rightText).width;
+  ctx.restore();
+
+  const minGap = 44;
+  const halfGap = Math.max((leftWidth + rightWidth) / 4 + minGap, pitchRect.w * 0.14);
+
+  const leftLabelX = centerX - halfGap;
+  plainText(ctx, leftText, leftLabelX, yText, textColor, fontSize, {
+    weight: 'normal',
+    align: 'center',
+  });
+
+  const rightLabelX = centerX + halfGap;
+  plainText(ctx, rightText, rightLabelX, yText, textColor, fontSize, {
+    weight: 'normal',
+    align: 'center',
+  });
+}
+
 /**
  * Render First + Second Ball events on a full pitch with tactical dashed guides.
  */
@@ -1852,7 +2279,8 @@ export function renderFirstSecondBallMap(
 ): void {
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
   const W = HEATMAP_CANVAS_W;
-  const H = HEATMAP_CANVAS_H;
+  // Give this chart more vertical breathing room for title/legend/direction rows.
+  const H = HEATMAP_CANVAS_H + 180;
   canvas.width = W * dpr;
   canvas.height = H * dpr;
 
@@ -1897,28 +2325,53 @@ export function renderFirstSecondBallMap(
   });
 
   const legendY = 195;
-  let lx = W * 0.12;
+  const legendItems: Array<
+    | { kind: 'team'; text: string; color: string }
+    | { kind: 'shape'; text: string; shape: 'circle' | 'diamond' }
+  > = [];
+
   if (ballEvents.some(e => String(e.playerTeam) === team1Id)) {
-    filledCircle(ctx, lx, legendY + 6, 12, team1Color, fc, 2);
-    plainText(ctx, labelForTeam(team1Id), lx + 24, legendY - 8, fc, 26);
-    lx += ctx.measureText(labelForTeam(team1Id)).width + 80;
+    legendItems.push({ kind: 'team', text: labelForTeam(team1Id), color: team1Color });
   }
   if (ballEvents.some(e => String(e.playerTeam) === team2Id)) {
-    filledCircle(ctx, lx, legendY + 6, 12, team2Color, fc, 2);
-    plainText(ctx, labelForTeam(team2Id), lx + 24, legendY - 8, fc, 26);
-    lx += ctx.measureText(labelForTeam(team2Id)).width + 80;
+    legendItems.push({ kind: 'team', text: labelForTeam(team2Id), color: team2Color });
+  }
+  legendItems.push({ kind: 'shape', text: `First Ball (${firstBalls.length})`, shape: 'circle' });
+  legendItems.push({ kind: 'shape', text: `Second Ball (${secondBalls.length})`, shape: 'diamond' });
+
+  const legendItemWidth = (item: (typeof legendItems)[number]): number => {
+    if (item.kind === 'team') {
+      ctx.font = `normal 26px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+      return 24 + ctx.measureText(item.text).width + 56;
+    }
+    ctx.font = `normal 24px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    return 22 + ctx.measureText(item.text).width + 50;
+  };
+
+  const totalLegendWidth = legendItems.reduce((sum, item) => sum + legendItemWidth(item), 0);
+  let lx = (W - totalLegendWidth) / 2;
+
+  for (const item of legendItems) {
+    if (item.kind === 'team') {
+      filledCircle(ctx, lx, legendY + 6, 12, item.color, fc, 2);
+      plainText(ctx, item.text, lx + 24, legendY - 8, fc, 26);
+      lx += legendItemWidth(item);
+      continue;
+    }
+
+    if (item.shape === 'circle') {
+      filledCircle(ctx, lx, legendY + 6, 10, fc, bg, 2);
+    } else {
+      diamond(ctx, lx, legendY + 6, 9, fc, bg, 2);
+    }
+    plainText(ctx, item.text, lx + 22, legendY - 8, fc, 24);
+    lx += legendItemWidth(item);
   }
 
-  // Shape legend (event type is shape, not colour).
-  filledCircle(ctx, lx, legendY + 6, 10, fc, bg, 2);
-  plainText(ctx, `First Ball (${firstBalls.length})`, lx + 22, legendY - 8, fc, 24);
-  lx += ctx.measureText(`First Ball (${firstBalls.length})`).width + 72;
-  diamond(ctx, lx, legendY + 6, 9, fc, bg, 2);
-  plainText(ctx, `Second Ball (${secondBalls.length})`, lx + 22, legendY - 8, fc, 24);
 
   const pitchAspect = PL / PW;
   const pitchPadX = 100;
-  const pitchPadTop = 250;
+  const pitchPadTop = 320;
   const pitchPadBot = 200;
   const availW = W - pitchPadX * 2;
   const availH = H - pitchPadTop - pitchPadBot;
@@ -1938,17 +2391,82 @@ export function renderFirstSecondBallMap(
   };
 
   drawFullPitch(ctx, pitchRect, bg, fc);
+
+  // Keep pitch uniform with a single background color.
+
   draw18ZoneGrid(ctx, pitchRect, SHOT_GREY, options.gridStyle ?? 'dotted');
   // Redraw field markings above guides to ensure perfect visual lock with official lines.
   drawFullPitch(ctx, pitchRect, 'transparent', fc);
 
+  // Match first and second balls into pairs
+  const ballPairs = matchFirstSecondBalls(firstBalls, secondBalls);
+
+  // Collect all ball positions for dense zone detection
+  const allBallPositions = ballEvents.map(e => ({
+    x: (e.startX / 100) * pitchRect.w,
+    y: (e.startY / 100) * pitchRect.h,
+  }));
+
+  // Draw connecting arrows from first to second ball (colored by second-ball winner)
+  for (const pair of ballPairs) {
+    const team2Id_val = String(pair.second.playerTeam);
+    const arrowColor = colorForTeam(team2Id_val);
+    const [px1, py1] = optaFull(pair.first.startX, pair.first.startY, pitchRect);
+    const [px2, py2] = optaFull(pair.second.startX, pair.second.startY, pitchRect);
+    drawArrow(ctx, px1, py1, px2, py2, arrowColor, 1.5, 6);
+  }
+
+  // Draw first ball events
   for (const ev of firstBalls) {
     const [px, py] = optaFull(ev.startX, ev.startY, pitchRect);
-    filledCircle(ctx, px, py, 9, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
+
+    // Apply jitter if in a dense zone
+    let drawX = px;
+    let drawY = py;
+    if (options.applyJitterToDense ?? true) {
+      const jitterResult = calculateJitter(px, py, 8, 24, allBallPositions.map(p => ({
+        x: p.x + pitchRect.x,
+        y: p.y + pitchRect.y,
+      })));
+      if (jitterResult.applied) {
+        drawX += jitterResult.jx;
+        drawY += jitterResult.jy;
+      }
+    }
+
+    filledCircle(ctx, drawX, drawY, 9, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
   }
+
+  // Draw second ball events
   for (const ev of secondBalls) {
     const [px, py] = optaFull(ev.startX, ev.startY, pitchRect);
-    diamond(ctx, px, py, 9, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
+
+    // Apply jitter if in a dense zone
+    let drawX = px;
+    let drawY = py;
+    if (options.applyJitterToDense ?? true) {
+      const jitterResult = calculateJitter(px, py, 8, 24, allBallPositions.map(p => ({
+        x: p.x + pitchRect.x,
+        y: p.y + pitchRect.y,
+      })));
+      if (jitterResult.applied) {
+        drawX += jitterResult.jx;
+        drawY += jitterResult.jy;
+      }
+    }
+
+    diamond(ctx, drawX, drawY, 9, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
+  }
+
+  // Draw attacking direction indicators
+  if (options.showAttackingDirection ?? true) {
+    drawAttackingDirectionIndicator(
+      ctx,
+      pitchRect,
+      labelForTeam(team1Id),
+      labelForTeam(team2Id),
+      SHOT_GREY,
+    );
   }
 
   const statsY = pitchRect.y + pitchRect.h + 50;

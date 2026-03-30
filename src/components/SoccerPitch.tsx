@@ -21,6 +21,8 @@ export function SoccerPitch() {
   const [resizeAnchor, setResizeAnchor] = useState<Position | null>(null);
   
   const {
+    selectedPlayer,
+    selectedTeam,
     selectedEventType,
     driveStartLocation,
     setDriveStartLocation,
@@ -34,9 +36,17 @@ export function SoccerPitch() {
 
   const { isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive, setIsDrillActive, setPendingArea, drawingForNewSession, setDrawingForNewSession } = useDrill();
   const { activeSession, updateSession } = useSession();
+  const isPlayup = selectedEventType === 'Playup Platform' || selectedEventType === 'Playup AAA';
   const isDriveSlip = selectedEventType === 'Drive + Slip';
 
   const highlightedEvent = events.find(e => e.id === highlightedEventId);
+  const isChainingFromHighlighted =
+    !isPlayup &&
+    !isDriveSlip &&
+    selectedEventType !== null &&
+    selectedPlayer !== null &&
+    selectedTeam !== null &&
+    !!highlightedEvent?.endLocation;
 
   // Drill area now lives on the active session
   const drillArea = activeSession?.area ?? null;
@@ -178,6 +188,14 @@ export function SoccerPitch() {
       return;
     }
 
+    if (isChainingFromHighlighted && highlightedEvent?.endLocation) {
+      // Chaining flow: inherit start from highlighted event end, and only click the next endpoint.
+      if (isDrillActive && drillArea && !isInsideDrillArea(pos)) return;
+      setStartLocation(highlightedEvent.endLocation);
+      setEndLocation(pos);
+      return;
+    }
+
     // Normal event tagging drag — reject if outside drill area when drill is active
     if (isDrillActive && drillArea && !isInsideDrillArea(pos)) return;
 
@@ -186,7 +204,7 @@ export function SoccerPitch() {
     setDragEnd(null);
     setStartLocation(null);
     setEndLocation(null);
-  }, [getPositionFromEvent, isDriveSlip, driveStartLocation, startLocation, endLocation, setDriveStartLocation, setStartLocation, setEndLocation, isDrawingDrillArea, drillCorner1, setIsDrawingDrillArea, isDrillActive, drillArea, isInsideDrillArea, setPendingArea, drawingForNewSession, activeSession, updateSession, setDrawingForNewSession]);
+  }, [getPositionFromEvent, isDriveSlip, isChainingFromHighlighted, highlightedEvent, driveStartLocation, startLocation, endLocation, setDriveStartLocation, setStartLocation, setEndLocation, isDrawingDrillArea, drillCorner1, setIsDrawingDrillArea, isDrillActive, drillArea, isInsideDrillArea, setPendingArea, drawingForNewSession, activeSession, updateSession, setDrawingForNewSession]);
 
   // ── Mouse move (shared: event drag, drill preview, resize) ──
   const handleMouseMove = useCallback((e: MouseEvent) => {

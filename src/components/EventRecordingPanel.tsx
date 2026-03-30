@@ -8,6 +8,7 @@ export function EventRecordingPanel() {
   const AUTO_RECORD_STORAGE_KEY = 'touchline_auto_record';
 
   const {
+    events,
     selectedPlayer,
     selectedTeam,
     setSelectedPlayer,
@@ -25,9 +26,11 @@ export function EventRecordingPanel() {
     currentVideoTime,
     players,
     addEvent,
+    setEventSequence,
     addPlayupEvent,
     addDriveSlipEvent,
     resetSelection,
+    highlightedEventId,
     setHighlightedEventId,
     eventTypes,
     addEventType,
@@ -143,6 +146,8 @@ export function EventRecordingPanel() {
   const isPlayup = selectedEventType === 'Playup Platform' || selectedEventType === 'Playup AAA';
   const isDriveSlip = selectedEventType === 'Drive + Slip';
   const isDualActorEvent = isPlayup || isDriveSlip;
+  const highlightedEvent = highlightedEventId ? events.find(e => e.id === highlightedEventId) : null;
+  const chainSourceReady = !isDualActorEvent && selectedEventType !== null && selectedPlayer !== null && selectedTeam !== null && !!highlightedEvent?.endLocation;
 
   const canRecord = isPlayup
     ? selectedPlayer !== null && selectedTeam !== null && playupReceiver !== null && playupReceiverTeam !== null && startLocation !== null && endLocation !== null
@@ -220,6 +225,56 @@ export function EventRecordingPanel() {
       const player = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
       if (!player) return;
 
+      const isChainedSingle = !!(
+        !isDualActorEvent &&
+        highlightedEvent &&
+        highlightedEvent.endLocation &&
+        startLocation &&
+        highlightedEvent.endLocation.x === startLocation.x &&
+        highlightedEvent.endLocation.y === startLocation.y
+      );
+
+      let nextSequenceId: string | undefined;
+      if (isChainedSingle && highlightedEvent) {
+        nextSequenceId = highlightedEvent.sequenceId || crypto.randomUUID();
+        if (!highlightedEvent.sequenceId) {
+          setEventSequence(highlightedEvent.id, nextSequenceId);
+        }
+
+        const isPlayupType = (t: string) => t === 'Playup Platform' || t === 'Playup AAA' || t === 'Playup Received';
+        const isDriveSlipType = (t: string) => t === 'Drive' || t === 'Slip Received';
+
+        const companionEvents = events.filter(e => {
+          if (e.id === highlightedEvent.id) return false;
+          if (e.sequenceId) return false;
+
+          const sameMoment = Math.abs(e.videoTimestamp - highlightedEvent.videoTimestamp) < 0.01;
+          if (!sameMoment) return false;
+
+          const samePath =
+            e.startLocation.x === highlightedEvent.startLocation.x &&
+            e.startLocation.y === highlightedEvent.startLocation.y &&
+            (e.endLocation?.x ?? 0) === (highlightedEvent.endLocation?.x ?? 0) &&
+            (e.endLocation?.y ?? 0) === (highlightedEvent.endLocation?.y ?? 0) &&
+            (e.driveStartLocation?.x ?? -1) === (highlightedEvent.driveStartLocation?.x ?? -1) &&
+            (e.driveStartLocation?.y ?? -1) === (highlightedEvent.driveStartLocation?.y ?? -1);
+
+          if (!samePath) return false;
+
+          if (isPlayupType(highlightedEvent.eventType)) {
+            return isPlayupType(e.eventType);
+          }
+          if (isDriveSlipType(highlightedEvent.eventType)) {
+            return isDriveSlipType(e.eventType);
+          }
+          return false;
+        });
+
+        for (const companion of companionEvents) {
+          setEventSequence(companion.id, nextSequenceId);
+        }
+      }
+
       // Session feature disabled: just record event with basic info
       addEvent({
         videoTimestamp: effectiveTime,
@@ -227,6 +282,8 @@ export function EventRecordingPanel() {
         playerName: player.name,
         playerTeam: selectedTeam,
         eventType: selectedEventType,
+        sequenceId: nextSequenceId,
+        parentEventId: isChainedSingle && highlightedEvent ? highlightedEvent.id : undefined,
         startLocation,
         endLocation: endLocation || undefined,
       });
@@ -720,6 +777,8 @@ export function EventRecordingPanel() {
                 {selectedPlayer && <span className="text-green-600 dark:text-green-400">#{selectedPlayer}</span>}
                 {selectedEventType && <span className="text-green-600 dark:text-green-400 ml-2">{selectedEventType}</span>}
                 {startLocation && <span className="text-green-600 dark:text-green-400 ml-2">Location set</span>}
+                {!startLocation && highlightedEventId && !highlightedEvent?.endLocation && <span className="text-yellow-600 dark:text-yellow-400 ml-2">Selected event has no end point</span>}
+                {!startLocation && chainSourceReady && <span className="text-blue-600 dark:text-blue-400 ml-2">Chain from {highlightedEvent?.eventType}: click next end point</span>}
               </>
             )}
           </div>

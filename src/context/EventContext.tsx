@@ -6,6 +6,7 @@ import { parseCSV, mergeEvents, findNewPlayers } from '../utils/importCsv';
 interface EventContextType {
   events: MatchEvent[];
   addEvent: (event: Omit<MatchEvent, 'id' | 'createdAt'>) => void;
+  setEventSequence: (eventId: string, sequenceId: string) => void;
   addPlayupEvent: (passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number, playupType: string) => void;
   addDriveSlipEvent: (dribbler: Player, receiver: Player, driveStartLoc: Position, passStartLoc: Position, passEndLoc: Position, videoTime: number) => void;
   deleteEvent: (id: string) => void;
@@ -256,6 +257,10 @@ export function EventProvider({ children }: { children: ReactNode }) {
     setEvents(prev => [...prev, newEvent].sort((a, b) => a.videoTimestamp - b.videoTimestamp));
   }, []);
 
+  const setEventSequence = useCallback((eventId: string, sequenceId: string) => {
+    setEvents(prev => prev.map(e => e.id === eventId ? { ...e, sequenceId } : e));
+  }, []);
+
   const addPlayupEvent = useCallback((passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number, playupType: string) => {
     const now = new Date().toISOString();
     const passEvent: MatchEvent = {
@@ -430,6 +435,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
       value={{
         events,
         addEvent,
+        setEventSequence,
         addPlayupEvent,
         addDriveSlipEvent,
         deleteEvent,

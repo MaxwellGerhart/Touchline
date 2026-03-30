@@ -162,6 +162,8 @@ export function parseCSV(csvText: string): ImportResult {
       playerName: get(cols, 'Player Name'),
       playerTeam,
       eventType: get(cols, 'Event Type'),
+      sequenceId: get(cols, 'Sequence ID') || undefined,
+      parentEventId: get(cols, 'Parent Event ID') || undefined,
       driveStartLocation,
       startLocation,
       endLocation,

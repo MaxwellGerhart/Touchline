@@ -31,6 +31,8 @@ export interface MatchEvent {
   playerName: string;
   playerTeam: TeamId;
   eventType: EventType;
+  sequenceId?: string; // Optional chain grouping id for linked sequences
+  parentEventId?: string; // Optional parent event reference in a sequence
   driveStartLocation?: Position; // Optional for Drive + Slip dribble path start
   startLocation: Position;
   endLocation?: Position; // Optional for directional events
