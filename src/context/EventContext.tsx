@@ -7,7 +7,15 @@ interface EventContextType {
   events: MatchEvent[];
   addEvent: (event: Omit<MatchEvent, 'id' | 'createdAt'>) => void;
   setEventSequence: (eventId: string, sequenceId: string) => void;
-  addPlayupEvent: (passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number, playupType: string) => void;
+  addPlayupEvent: (
+    passer: Player,
+    receiver: Player,
+    startLoc: Position,
+    endLoc: Position,
+    videoTime: number,
+    playupType: string,
+    chainMeta?: { sequenceId?: string; parentEventId?: string },
+  ) => void;
   addDriveSlipEvent: (dribbler: Player, receiver: Player, driveStartLoc: Position, passStartLoc: Position, passEndLoc: Position, videoTime: number) => void;
   deleteEvent: (id: string) => void;
   updateEventTime: (id: string, newTimestamp: number) => void;
@@ -261,7 +269,15 @@ export function EventProvider({ children }: { children: ReactNode }) {
     setEvents(prev => prev.map(e => e.id === eventId ? { ...e, sequenceId } : e));
   }, []);
 
-  const addPlayupEvent = useCallback((passer: Player, receiver: Player, startLoc: Position, endLoc: Position, videoTime: number, playupType: string) => {
+  const addPlayupEvent = useCallback((
+    passer: Player,
+    receiver: Player,
+    startLoc: Position,
+    endLoc: Position,
+    videoTime: number,
+    playupType: string,
+    chainMeta?: { sequenceId?: string; parentEventId?: string },
+  ) => {
     const now = new Date().toISOString();
     const passEvent: MatchEvent = {
       id: uuidv4(),
@@ -270,6 +286,8 @@ export function EventProvider({ children }: { children: ReactNode }) {
       playerName: passer.name,
       playerTeam: passer.team,
       eventType: playupType,
+      sequenceId: chainMeta?.sequenceId,
+      parentEventId: chainMeta?.parentEventId,
       startLocation: startLoc,
       endLocation: endLoc,
       createdAt: now,
@@ -281,6 +299,8 @@ export function EventProvider({ children }: { children: ReactNode }) {
       playerName: receiver.name,
       playerTeam: receiver.team,
       eventType: 'Playup Received',
+      sequenceId: chainMeta?.sequenceId,
+      parentEventId: chainMeta?.parentEventId,
       startLocation: startLoc,
       endLocation: endLoc,
       createdAt: now,

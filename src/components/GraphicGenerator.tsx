@@ -36,6 +36,7 @@ import {
   REPORT_CANVAS_H,
 } from '../utils/pitchRenderer';
 import { computeShotFeatures, predictXg } from '../utils/xgModel';
+import { buildSequenceRenderData } from '../utils/sequences';
 import { generateMatchReportPDF } from '../utils/pdfExport';
 
 type GraphicType = 'playup' | 'driveslip' | 'eventsequence' | 'shotxg' | 'heatmap' | 'midrecoveries' | 'firstsecondball' | 'xgtimeline' | 'matchreport';
@@ -126,6 +127,7 @@ export function GraphicGenerator() {
   const [showMidPenaltyLanes, setShowMidPenaltyLanes] = useState(true);
   const [firstSecondGridStyle, setFirstSecondGridStyle] = useState<'dotted' | 'dashed'>('dotted');
   const [selectedSequenceIds, setSelectedSequenceIds] = useState<string[]>([]);
+  const [includePlayupsInSequenceMap, setIncludePlayupsInSequenceMap] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [excludedEventTypes, setExcludedEventTypes] = useState<Set<string>>(new Set());
   const [halfSelection, setHalfSelection] = useState<HalfSelection>('both');
@@ -261,8 +263,25 @@ export function GraphicGenerator() {
   }, [teamFilteredEvents, getExplicitSequenceKey]);
 
   const getSequenceKey = useCallback((event: GraphicEvent): string | undefined => {
-    return getExplicitSequenceKey(event) || inferredSequenceKeys.get(event);
-  }, [getExplicitSequenceKey, inferredSequenceKeys]);
+    const explicitOrInferred = getExplicitSequenceKey(event) || inferredSequenceKeys.get(event);
+    if (explicitOrInferred) return explicitOrInferred;
+    if (!includePlayupsInSequenceMap) return undefined;
+
+    const normalizedType = event.eventType.toLowerCase();
+    const isPlayupType = normalizedType === 'playup platform' || normalizedType === 'playup aaa' || normalizedType === 'playup received';
+    if (!isPlayupType) return undefined;
+
+    const ts = (event.videoTimestamp ?? 0).toFixed(2);
+    return [
+      'playup',
+      ts,
+      event.startX.toFixed(2),
+      event.startY.toFixed(2),
+      event.endX.toFixed(2),
+      event.endY.toFixed(2),
+      String(event.playerTeam),
+    ].join(':');
+  }, [getExplicitSequenceKey, inferredSequenceKeys, includePlayupsInSequenceMap]);
 
   const eventSequenceSourceEvents: GraphicEvent[] = useMemo(() => {
     if (!selectedPlayer) return teamFilteredEvents;
@@ -316,7 +335,12 @@ export function GraphicGenerator() {
           const key = getSequenceKey(e);
           return key ? selectedSet.has(key) : false;
         });
-    const directional = source.filter(e => !(e.endX === 0 && e.endY === 0));
+    const keyedSource = source.map(e => {
+      const key = getSequenceKey(e);
+      if (!key || e.sequenceId === key) return e;
+      return { ...e, sequenceId: key };
+    });
+    const directional = keyedSource.filter(e => !(e.endX === 0 && e.endY === 0));
 
     // Normalize direction by mirroring second-half in-app events.
     if (dataSource !== 'app') return directional;
@@ -333,6 +357,10 @@ export function GraphicGenerator() {
       };
     });
   }, [sequencedEvents, selectedSequenceIds, getSequenceKey, dataSource]);
+
+  const eventSequenceRenderData = useMemo(() => {
+    return buildSequenceRenderData(eventSequenceEvents, getSequenceKey);
+  }, [eventSequenceEvents, getSequenceKey]);
 
   useEffect(() => {
     setSelectedSequenceIds(prev => {
@@ -607,6 +635,8 @@ export function GraphicGenerator() {
         subtitle: subtitle || '',
         teamColor,
         eventStyles: eventSequenceStyles,
+        sequenceLabels: eventSequenceRenderData.sequenceLabels,
+        markerEvents: eventSequenceRenderData.markerEvents,
       };
       renderEventSequenceMap(canvas, eventSequenceEvents, opts);
     } else if (graphicType === 'shotxg') {
@@ -705,7 +735,7 @@ export function GraphicGenerator() {
       renderXGTimeline(canvas, xgEvents, opts);
     }
     setGenerated(true);
-  }, [graphicType, filteredEvents, playupFilteredEvents, driveSlipFilteredEvents, eventSequenceEvents, eventSequenceStyles, selectedSequenceIds, midRecoveriesEvents, firstSecondBallEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, halfFilteredAppEvents, reportEvents, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle]);
+  }, [graphicType, filteredEvents, playupFilteredEvents, driveSlipFilteredEvents, eventSequenceEvents, eventSequenceStyles, eventSequenceRenderData, selectedSequenceIds, midRecoveriesEvents, firstSecondBallEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, halfFilteredAppEvents, reportEvents, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle]);
 
   const exportPNG = useCallback(() => {
     const canvas = canvasRef.current;
@@ -986,63 +1016,79 @@ export function GraphicGenerator() {
         </label>
 
         {graphicType === 'eventsequence' && (
-          <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
-            Sequences
-            <details className="relative w-56">
-              <summary className="list-none cursor-pointer px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white select-none focus:outline-none">
-                {selectedSequenceLabel}
-              </summary>
-              <div className="absolute z-20 mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg p-2 max-h-56 overflow-auto">
-                <div className="flex items-center gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSequenceIds([]);
-                      setGenerated(false);
-                    }}
-                    className="px-2 py-1 rounded border border-gray-300 dark:border-gray-700 text-[11px] text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                  >
-                    All
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSequenceIds(sequenceOptions.map(s => s.id));
-                      setGenerated(false);
-                    }}
-                    className="px-2 py-1 rounded border border-gray-300 dark:border-gray-700 text-[11px] text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                  >
-                    Select All
-                  </button>
-                </div>
+          <div className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+              Sequences
+              <details className="relative w-56">
+                <summary className="list-none cursor-pointer px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white select-none focus:outline-none">
+                  {selectedSequenceLabel}
+                </summary>
+                <div className="absolute z-20 mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg p-2 max-h-56 overflow-auto">
+                  <div className="flex items-center gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSequenceIds([]);
+                        setGenerated(false);
+                      }}
+                      className="px-2 py-1 rounded border border-gray-300 dark:border-gray-700 text-[11px] text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSequenceIds(sequenceOptions.map(s => s.id));
+                        setGenerated(false);
+                      }}
+                      className="px-2 py-1 rounded border border-gray-300 dark:border-gray-700 text-[11px] text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      Select All
+                    </button>
+                  </div>
 
-                <div className="flex flex-col gap-1">
-                  {sequenceOptions.map(seq => {
-                    const checked = selectedSequenceIds.includes(seq.id);
-                    return (
-                      <label key={seq.id} className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 px-1 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            setSelectedSequenceIds(prev => {
-                              if (prev.includes(seq.id)) {
-                                return prev.filter(id => id !== seq.id);
-                              }
-                              return [...prev, seq.id];
-                            });
-                            setGenerated(false);
-                          }}
-                          className="h-3.5 w-3.5"
-                        />
-                        <span className="truncate">{seq.label}</span>
-                      </label>
-                    );
-                  })}
+                  <div className="flex flex-col gap-1">
+                    {sequenceOptions.map(seq => {
+                      const checked = selectedSequenceIds.includes(seq.id);
+                      return (
+                        <label key={seq.id} className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 px-1 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setSelectedSequenceIds(prev => {
+                                if (prev.includes(seq.id)) {
+                                  return prev.filter(id => id !== seq.id);
+                                }
+                                return [...prev, seq.id];
+                              });
+                              setGenerated(false);
+                            }}
+                            className="h-3.5 w-3.5"
+                          />
+                          <span className="truncate">{seq.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            </details>
-          </label>
+              </details>
+            </label>
+
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={includePlayupsInSequenceMap}
+                onChange={e => {
+                  setIncludePlayupsInSequenceMap(e.target.checked);
+                  setSelectedSequenceIds([]);
+                  setGenerated(false);
+                }}
+                className="rounded border-gray-300 dark:border-gray-700"
+              />
+              Include Playups
+            </label>
+          </div>
         )}
 
         {/* Team Name Override */}

@@ -147,10 +147,11 @@ export function EventRecordingPanel() {
   const isDriveSlip = selectedEventType === 'Drive + Slip';
   const isDualActorEvent = isPlayup || isDriveSlip;
   const highlightedEvent = highlightedEventId ? events.find(e => e.id === highlightedEventId) : null;
-  const chainSourceReady = !isDualActorEvent && selectedEventType !== null && selectedPlayer !== null && selectedTeam !== null && !!highlightedEvent?.endLocation;
+  const chainSourceReady = !isDriveSlip && selectedEventType !== null && selectedPlayer !== null && selectedTeam !== null && !!highlightedEvent?.endLocation;
+  const effectivePlayupStart = startLocation ?? (chainSourceReady ? highlightedEvent?.endLocation ?? null : null);
 
   const canRecord = isPlayup
-    ? selectedPlayer !== null && selectedTeam !== null && playupReceiver !== null && playupReceiverTeam !== null && startLocation !== null && endLocation !== null
+    ? selectedPlayer !== null && selectedTeam !== null && playupReceiver !== null && playupReceiverTeam !== null && effectivePlayupStart !== null && endLocation !== null
     : isDriveSlip
     ? selectedPlayer !== null && selectedTeam !== null && driveSlipReceiver !== null && driveSlipReceiverTeam !== null && driveStartLocation !== null && startLocation !== null && endLocation !== null
     : selectedPlayer !== null && selectedTeam !== null && selectedEventType !== null && startLocation !== null;
@@ -163,7 +164,7 @@ export function EventRecordingPanel() {
       String(selectedPlayer ?? ''),
       String(playupReceiverTeam ?? ''),
       String(playupReceiver ?? ''),
-      startLocation ? `${startLocation.x.toFixed(2)}:${startLocation.y.toFixed(2)}` : '',
+      effectivePlayupStart ? `${effectivePlayupStart.x.toFixed(2)}:${effectivePlayupStart.y.toFixed(2)}` : '',
       endLocation ? `${endLocation.x.toFixed(2)}:${endLocation.y.toFixed(2)}` : '',
       effectiveTime.toFixed(2),
     ].join('|')
@@ -208,41 +209,14 @@ export function EventRecordingPanel() {
   const handleRecordEvent = () => {
     if (!canRecord) return;
 
-    if (isPlayup) {
-      if (selectedPlayer === null || selectedTeam === null || playupReceiver === null || playupReceiverTeam === null || startLocation === null || endLocation === null) return;
-      const passer = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
-      const receiver = players.find(p => p.id === playupReceiver && p.team === playupReceiverTeam);
-      if (!passer || !receiver) return;
-      addPlayupEvent(passer, receiver, startLocation, endLocation, effectiveTime, selectedEventType);
-    } else if (isDriveSlip) {
-      if (selectedPlayer === null || selectedTeam === null || driveSlipReceiver === null || driveSlipReceiverTeam === null || driveStartLocation === null || startLocation === null || endLocation === null) return;
-      const dribbler = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
-      const receiver = players.find(p => p.id === driveSlipReceiver && p.team === driveSlipReceiverTeam);
-      if (!dribbler || !receiver) return;
-      addDriveSlipEvent(dribbler, receiver, driveStartLocation, startLocation, endLocation, effectiveTime);
-    } else {
-      if (selectedPlayer === null || selectedTeam === null || selectedEventType === null || startLocation === null) return;
-      const player = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
-      if (!player) return;
+    const isPlayupType = (t: string) => t === 'Playup Platform' || t === 'Playup AAA' || t === 'Playup Received';
+    const isDriveSlipType = (t: string) => t === 'Drive' || t === 'Slip Received';
 
-      const isChainedSingle = !!(
-        !isDualActorEvent &&
-        highlightedEvent &&
-        highlightedEvent.endLocation &&
-        startLocation &&
-        highlightedEvent.endLocation.x === startLocation.x &&
-        highlightedEvent.endLocation.y === startLocation.y
-      );
-
-      let nextSequenceId: string | undefined;
-      if (isChainedSingle && highlightedEvent) {
-        nextSequenceId = highlightedEvent.sequenceId || crypto.randomUUID();
-        if (!highlightedEvent.sequenceId) {
-          setEventSequence(highlightedEvent.id, nextSequenceId);
-        }
-
-        const isPlayupType = (t: string) => t === 'Playup Platform' || t === 'Playup AAA' || t === 'Playup Received';
-        const isDriveSlipType = (t: string) => t === 'Drive' || t === 'Slip Received';
+    const ensureHighlightedSequence = () => {
+      if (!highlightedEvent || !highlightedEvent.endLocation) return undefined;
+      const sequenceId = highlightedEvent.sequenceId || crypto.randomUUID();
+      if (!highlightedEvent.sequenceId) {
+        setEventSequence(highlightedEvent.id, sequenceId);
 
         const companionEvents = events.filter(e => {
           if (e.id === highlightedEvent.id) return false;
@@ -271,8 +245,57 @@ export function EventRecordingPanel() {
         });
 
         for (const companion of companionEvents) {
-          setEventSequence(companion.id, nextSequenceId);
+          setEventSequence(companion.id, sequenceId);
         }
+      }
+      return sequenceId;
+    };
+
+    if (isPlayup) {
+      if (selectedPlayer === null || selectedTeam === null || playupReceiver === null || playupReceiverTeam === null || endLocation === null) return;
+      const passer = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
+      const receiver = players.find(p => p.id === playupReceiver && p.team === playupReceiverTeam);
+      if (!passer || !receiver) return;
+
+      const playupStart = effectivePlayupStart;
+      if (!playupStart) return;
+
+      const isChainedPlayup = !!(
+        chainSourceReady &&
+        highlightedEvent &&
+        highlightedEvent.endLocation &&
+        playupStart.x === highlightedEvent.endLocation.x &&
+        playupStart.y === highlightedEvent.endLocation.y
+      );
+
+      const nextSequenceId = isChainedPlayup ? ensureHighlightedSequence() : undefined;
+      addPlayupEvent(passer, receiver, playupStart, endLocation, effectiveTime, selectedEventType, {
+        sequenceId: nextSequenceId,
+        parentEventId: isChainedPlayup && highlightedEvent ? highlightedEvent.id : undefined,
+      });
+    } else if (isDriveSlip) {
+      if (selectedPlayer === null || selectedTeam === null || driveSlipReceiver === null || driveSlipReceiverTeam === null || driveStartLocation === null || startLocation === null || endLocation === null) return;
+      const dribbler = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
+      const receiver = players.find(p => p.id === driveSlipReceiver && p.team === driveSlipReceiverTeam);
+      if (!dribbler || !receiver) return;
+      addDriveSlipEvent(dribbler, receiver, driveStartLocation, startLocation, endLocation, effectiveTime);
+    } else {
+      if (selectedPlayer === null || selectedTeam === null || selectedEventType === null || startLocation === null) return;
+      const player = players.find(p => p.id === selectedPlayer && p.team === selectedTeam);
+      if (!player) return;
+
+      const isChainedSingle = !!(
+        !isDualActorEvent &&
+        highlightedEvent &&
+        highlightedEvent.endLocation &&
+        startLocation &&
+        highlightedEvent.endLocation.x === startLocation.x &&
+        highlightedEvent.endLocation.y === startLocation.y
+      );
+
+      let nextSequenceId: string | undefined;
+      if (isChainedSingle && highlightedEvent) {
+        nextSequenceId = ensureHighlightedSequence();
       }
 
       // Session feature disabled: just record event with basic info

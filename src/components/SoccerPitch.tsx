@@ -36,12 +36,10 @@ export function SoccerPitch() {
 
   const { isDrawingDrillArea, setIsDrawingDrillArea, isDrillActive, setIsDrillActive, setPendingArea, drawingForNewSession, setDrawingForNewSession } = useDrill();
   const { activeSession, updateSession } = useSession();
-  const isPlayup = selectedEventType === 'Playup Platform' || selectedEventType === 'Playup AAA';
   const isDriveSlip = selectedEventType === 'Drive + Slip';
 
   const highlightedEvent = events.find(e => e.id === highlightedEventId);
   const isChainingFromHighlighted =
-    !isPlayup &&
     !isDriveSlip &&
     selectedEventType !== null &&
     selectedPlayer !== null &&

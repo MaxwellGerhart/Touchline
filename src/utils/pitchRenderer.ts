@@ -59,6 +59,8 @@ export interface EventSequenceMapOptions {
   subtitle: string;
   teamColor: string;
   eventStyles: Record<string, EventSequenceStyle>;
+  sequenceLabels?: string[];
+  markerEvents?: GraphicEvent[];
 }
 
 export interface ShotMapOptions {
@@ -1304,19 +1306,25 @@ export function renderEventSequenceMap(
   const typeCounts = new Map<string, number>();
   const sequenceMarkerRadius = 24;
   const renderedSegments: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+  const markerEvents = (options.markerEvents ?? directionalEvents).filter(e => !(e.endX === 0 && e.endY === 0));
 
   for (const ev of directionalEvents) {
     typeCounts.set(ev.eventType, (typeCounts.get(ev.eventType) || 0) + 1);
   }
 
-  const firstTouchByPlayer = new Map<string, { x: number; y: number }>();
+  const firstTouchByPlayerInSequence = new Map<string, { x: number; y: number }>();
+  const getSequenceKey = (ev: GraphicEvent) => ev.sequenceId || (ev.parentEventId ? `chain-${ev.parentEventId}` : 'ungrouped');
   for (const ev of directionalEvents) {
-    if (!ev.playerName || firstTouchByPlayer.has(ev.playerName)) continue;
+    if (!ev.playerName) continue;
+    const perSequencePlayerKey = `${getSequenceKey(ev)}::${ev.playerName}`;
+    if (firstTouchByPlayerInSequence.has(perSequencePlayerKey)) continue;
+
     const isReceivedEvent = ev.eventType.toLowerCase().includes('received');
+    const isChainedPassReceiver = ev.eventType.toLowerCase() === 'pass' && !!ev.sequenceId;
     const hasValidEnd = !(ev.endX === 0 && ev.endY === 0);
-    firstTouchByPlayer.set(
-      ev.playerName,
-      isReceivedEvent && hasValidEnd
+    firstTouchByPlayerInSequence.set(
+      perSequencePlayerKey,
+      (isReceivedEvent || isChainedPassReceiver) && hasValidEnd
         ? { x: ev.endX, y: ev.endY }
         : { x: ev.startX, y: ev.startY },
     );
@@ -1429,6 +1437,15 @@ export function renderEventSequenceMap(
     ctx.closePath();
     ctx.fillStyle = style.color;
     ctx.fill();
+  }
+
+  for (const ev of markerEvents) {
+    const style = options.eventStyles[ev.eventType] ?? {
+      color: tc,
+      lineStyle: 'solid',
+      lineWidth: 6,
+    };
+    const [sx, sy] = optaFull(ev.startX, ev.startY, pitchRect);
 
     filledCircle(ctx, sx, sy, sequenceMarkerRadius, style.color, fc, 2.6);
     if (typeof ev.playerId === 'number') {
@@ -1496,8 +1513,10 @@ export function renderEventSequenceMap(
     return aa.x < bb.x + bb.w && aa.x + aa.w > bb.x && aa.y < bb.y + bb.h && aa.y + aa.h > bb.y;
   };
 
-  for (const [playerName, first] of firstTouchByPlayer.entries()) {
+  for (const [sequencePlayerKey, first] of firstTouchByPlayerInSequence.entries()) {
     if (!first) continue;
+    const playerName = sequencePlayerKey.split('::')[1] || '';
+    if (!playerName) continue;
     const [anchorX, anchorY] = optaFull(first.x, first.y, pitchRect);
     ctx.font = `bold 20px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
     const labelW = ctx.measureText(playerName).width;
