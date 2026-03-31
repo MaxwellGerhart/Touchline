@@ -718,15 +718,16 @@ export function renderPlayupMap(
   canvas: HTMLCanvasElement,
   events: GraphicEvent[],
   options: PlayupMapOptions,
+  scaleFactor?: number,
 ): void {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
   const W = PLAYUP_CANVAS_W;
   const H = PLAYUP_CANVAS_H;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(effectiveScale, effectiveScale);
 
   const bg = SHOT_BG;
   const tc = options.teamColor || '#001E44';
@@ -1012,15 +1013,16 @@ export function renderDriveSlipMap(
   canvas: HTMLCanvasElement,
   events: GraphicEvent[],
   options: DriveSlipMapOptions,
+  scaleFactor?: number,
 ): void {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
   const W = PLAYUP_CANVAS_W;
   const H = PLAYUP_CANVAS_H;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(effectiveScale, effectiveScale);
 
   const bg = SHOT_BG;
   const tc = options.teamColor || '#5B21B6';
@@ -1274,19 +1276,21 @@ export function renderEventSequenceMap(
   canvas: HTMLCanvasElement,
   events: GraphicEvent[],
   options: EventSequenceMapOptions,
+  scaleFactor?: number,
 ): void {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
   const W = PLAYUP_CANVAS_W;
   const H = PLAYUP_CANVAS_H;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(effectiveScale, effectiveScale);
 
   const bg = SHOT_BG;
   const tc = options.teamColor || '#001E44';
   const fc = SHOT_TEXT;
+  const sequenceMarkerRadius = 24;
 
   const directionalEvents = events.filter(e => !(e.endX === 0 && e.endY === 0));
 
@@ -1304,7 +1308,6 @@ export function renderEventSequenceMap(
   });
 
   const typeCounts = new Map<string, number>();
-  const sequenceMarkerRadius = 24;
   const renderedSegments: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
   const markerEvents = (options.markerEvents ?? directionalEvents).filter(e => !(e.endX === 0 && e.endY === 0));
 
@@ -1404,6 +1407,7 @@ export function renderEventSequenceMap(
   };
   drawFullPitch(ctx, pitchRect, bg, fc);
 
+  // Draw all the lines first
   for (const ev of directionalEvents) {
     const style = options.eventStyles[ev.eventType] ?? {
       color: tc,
@@ -1427,7 +1431,17 @@ export function renderEventSequenceMap(
     line(ctx, sx, sy, ex, ey, style.color, Math.max(2.5, style.lineWidth + 1));
     renderedSegments.push({ x1: sx, y1: sy, x2: ex, y2: ey });
     ctx.restore();
+  }
 
+  // Draw all endpoint arrows on top (so they appear over the lines)
+  for (const ev of directionalEvents) {
+    const style = options.eventStyles[ev.eventType] ?? {
+      color: tc,
+      lineStyle: 'solid',
+      lineWidth: 6,
+    };
+    const [sx, sy] = optaFull(ev.startX, ev.startY, pitchRect);
+    const [ex, ey] = optaFull(ev.endX, ev.endY, pitchRect);
     const angle = Math.atan2(ey - sy, ex - sx);
     const head = 16;
     ctx.beginPath();
@@ -1549,8 +1563,9 @@ export function renderEventSequenceMap(
 
     const placed = { x: chosen.x, y: chosen.y, w: labelW, h: labelH };
     placedLabelRects.push(placed);
-    plainText(ctx, playerName, chosen.x, chosen.y, fc, 20, {
+    outlinedText(ctx, playerName, chosen.x, chosen.y, fc, '#FFFFFF', 20, {
       weight: 'bold',
+      outlineWidth: 3,
     });
   }
 
@@ -1619,15 +1634,16 @@ export function renderShotMap(
   canvas: HTMLCanvasElement,
   events: GraphicEvent[],
   options: ShotMapOptions,
+  scaleFactor?: number,
 ): void {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
   const W = SHOT_CANVAS_W;
   const H = SHOT_CANVAS_H;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(effectiveScale, effectiveScale);
   const bg = SHOT_BG;
   const tc = options.teamColor || '#001E44';
   const fc = SHOT_TEXT;
@@ -1770,15 +1786,16 @@ export function renderDefensiveHeatmap(
   canvas: HTMLCanvasElement,
   events: GraphicEvent[],
   options: HeatmapOptions,
+  scaleFactor?: number,
 ): void {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
   const W = HEATMAP_CANVAS_W;
   const H = HEATMAP_CANVAS_H;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(effectiveScale, effectiveScale);
 
   const bg = SHOT_BG;
   const tc = options.teamColor || '#001E44';
@@ -1980,15 +1997,16 @@ export function renderMidRecoveriesHeatmap(
   canvas: HTMLCanvasElement,
   events: GraphicEvent[],
   options: MidRecoveriesOptions,
+  scaleFactor?: number,
 ): void {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
   const W = HEATMAP_CANVAS_W;
   const H = HEATMAP_CANVAS_H;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(effectiveScale, effectiveScale);
 
   const bg = SHOT_BG;
   const tc = options.teamColor || '#001E44';
@@ -2295,16 +2313,17 @@ export function renderFirstSecondBallMap(
   canvas: HTMLCanvasElement,
   events: GraphicEvent[],
   options: FirstSecondBallMapOptions,
+  scaleFactor?: number,
 ): void {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
   const W = HEATMAP_CANVAS_W;
   // Give this chart more vertical breathing room for title/legend/direction rows.
   const H = HEATMAP_CANVAS_H + 180;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(effectiveScale, effectiveScale);
 
   const bg = SHOT_BG;
   const fc = SHOT_TEXT;
@@ -2453,7 +2472,7 @@ export function renderFirstSecondBallMap(
       }
     }
 
-    filledCircle(ctx, drawX, drawY, 9, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
+    filledCircle(ctx, drawX, drawY, 12, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
   }
 
   // Draw second ball events
@@ -2474,7 +2493,7 @@ export function renderFirstSecondBallMap(
       }
     }
 
-    diamond(ctx, drawX, drawY, 9, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
+    diamond(ctx, drawX, drawY, 12, colorForTeam(ev.playerTeam), '#FFFFFF', 2);
   }
 
   // Draw attacking direction indicators
@@ -2549,15 +2568,16 @@ export function renderXGTimeline(
   canvas: HTMLCanvasElement,
   events: XGTimelineEvent[],
   options: XGTimelineOptions,
+  scaleFactor?: number,
 ): void {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
   const W = XG_TIMELINE_W;
   const H = XG_TIMELINE_H;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(effectiveScale, effectiveScale);
 
   const bg = SHOT_BG;
   const fc = SHOT_TEXT;
@@ -2869,8 +2889,9 @@ export function renderMatchReport(
   canvas: HTMLCanvasElement,
   events: GraphicEvent[],
   options: MatchReportOptions,
+  scaleFactor?: number,
 ): void {
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
   const W = REPORT_CANVAS_W;
 
   // ── Pre-scan data to compute dynamic height ─────────────────────────
@@ -2889,11 +2910,11 @@ export function renderMatchReport(
   const H = Math.max(REPORT_CANVAS_H,
     155 + 64 + 36 + 46 + eventTypes.length * barRowH + 30 + 44 + (playerRows + 1) * rowHeight + 80);
 
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
 
   const ctx = canvas.getContext('2d')!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(effectiveScale, effectiveScale);
 
   const bg = SHOT_BG;
   const fc = SHOT_TEXT;

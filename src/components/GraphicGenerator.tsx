@@ -135,6 +135,7 @@ export function GraphicGenerator() {
   const [pdfPlots, setPdfPlots] = useState<Set<string>>(new Set());
   const [showPdfOptions, setShowPdfOptions] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [exportScale, setExportScale] = useState(2.5);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -383,6 +384,23 @@ export function GraphicGenerator() {
   }, [selectedSequenceIds, sequenceOptions]);
 
   const buildDefaultSequenceStyle = useCallback((eventType: string): EventSequenceStyle => {
+    const typeNormalized = eventType.toLowerCase();
+    
+    // Predefined defaults for common event types
+    const defaults: Record<string, EventSequenceStyle> = {
+      'dribble': { color: '#888888', lineStyle: 'dotted', lineWidth: 6 },
+      'pass': { color: '#001E44', lineStyle: 'solid', lineWidth: 6 },
+      'playup platform': { color: '#4A90E2', lineStyle: 'solid', lineWidth: 6 },
+      'playup aaa': { color: '#4A90E2', lineStyle: 'solid', lineWidth: 6 },
+      'playup received': { color: '#87CEEB', lineStyle: 'solid', lineWidth: 6 },
+      'shot': { color: '#E74C3C', lineStyle: 'solid', lineWidth: 6 },
+    };
+    
+    if (defaults[typeNormalized]) {
+      return defaults[typeNormalized];
+    }
+    
+    // Fallback for unknown types: use hash-based palette
     const palette = ['#001E44', '#C41E3A', '#2E8B57', '#8B5CF6', '#0EA5E9', '#F59E0B', '#14B8A6', '#EF4444'];
     let hash = 0;
     for (let i = 0; i < eventType.length; i++) {
@@ -463,49 +481,43 @@ export function GraphicGenerator() {
   const playupFilteredEvents: GraphicEvent[] = useMemo(() => {
     if (!selectedPlayer) return teamFilteredEvents;
 
-    // Start with all events already attributed to this player
+    // Start with all events from the selected player
     const playerEvents = teamFilteredEvents.filter(e => e.playerName === selectedPlayer);
 
-    // Build a set of coordinate keys from this player's "Playup Received" events
-    const receivedKeys = new Set<string>();
-    playerEvents
-      .filter(e => e.eventType.toLowerCase() === 'playup received')
-      .forEach(e => {
-        receivedKeys.add(`${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`);
-      });
-
-    // Also include pass events (from other players) that this player received
-    if (receivedKeys.size > 0) {
-      const passTypes = ['playup platform', 'playup aaa'];
-      const extraPasses = teamFilteredEvents.filter(e => {
-        if (e.playerName === selectedPlayer) return false; // already included
-        if (!passTypes.includes(e.eventType.toLowerCase())) return false;
-        const key = `${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`;
-        return receivedKeys.has(key);
-      });
-      return [...playerEvents, ...extraPasses];
-    }
-
-    // Also check the reverse: if the player made passes, include the received events
+    // Find all passes FROM the selected player and get their corresponding received events
+    const playupPassTypes = ['playup platform', 'playup aaa'];
+    const passesFromPlayer = playerEvents.filter(e => playupPassTypes.includes(e.eventType.toLowerCase()));
+    
+    // Build a set of coordinate keys from passes the player made
     const passKeys = new Set<string>();
-    const passTypes = ['playup platform', 'playup aaa'];
-    playerEvents
-      .filter(e => passTypes.includes(e.eventType.toLowerCase()))
-      .forEach(e => {
-        passKeys.add(`${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`);
-      });
+    passesFromPlayer.forEach(e => {
+      passKeys.add(`${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`);
+    });
 
-    if (passKeys.size > 0) {
-      const extraReceived = teamFilteredEvents.filter(e => {
-        if (e.playerName === selectedPlayer) return false;
-        if (e.eventType.toLowerCase() !== 'playup received') return false;
-        const key = `${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`;
-        return passKeys.has(key);
-      });
-      return [...playerEvents, ...extraReceived];
-    }
+    // Include all received events that match those passes (showing who they passed to)
+    const receivedFromPassesTheyMade = teamFilteredEvents.filter(e => {
+      if (e.playerName === selectedPlayer) return false; // already included
+      if (e.eventType.toLowerCase() !== 'playup received') return false;
+      const key = `${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`;
+      return passKeys.has(key);
+    });
 
-    return playerEvents;
+    // Also find all received events FOR the selected player and get their corresponding passes
+    const receivedByPlayer = playerEvents.filter(e => e.eventType.toLowerCase() === 'playup received');
+    const receivedKeys = new Set<string>();
+    receivedByPlayer.forEach(e => {
+      receivedKeys.add(`${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`);
+    });
+
+    // Include all pass events that match those received events (showing who passed to them)
+    const passesFromOthersToPlayer = teamFilteredEvents.filter(e => {
+      if (e.playerName === selectedPlayer) return false; // already included
+      if (!playupPassTypes.includes(e.eventType.toLowerCase())) return false;
+      const key = `${e.startX.toFixed(2)},${e.startY.toFixed(2)},${e.endX.toFixed(2)},${e.endY.toFixed(2)}`;
+      return receivedKeys.has(key);
+    });
+
+    return [...playerEvents, ...receivedFromPassesTheyMade, ...passesFromOthersToPlayer];
   }, [selectedPlayer, teamFilteredEvents]);
 
   const driveSlipFilteredEvents: GraphicEvent[] = useMemo(() => {
@@ -621,14 +633,14 @@ export function GraphicGenerator() {
         subtitle: subtitle || '',
         teamColor,
       };
-      renderPlayupMap(canvas, playupFilteredEvents, opts);
+      renderPlayupMap(canvas, playupFilteredEvents, opts, exportScale);
     } else if (graphicType === 'driveslip') {
       const opts: DriveSlipMapOptions = {
         teamName: displayName,
         subtitle: subtitle || '',
         teamColor,
       };
-      renderDriveSlipMap(canvas, driveSlipFilteredEvents, opts);
+      renderDriveSlipMap(canvas, driveSlipFilteredEvents, opts, exportScale);
     } else if (graphicType === 'eventsequence') {
       const opts: EventSequenceMapOptions = {
         teamName: displayName,
@@ -638,7 +650,7 @@ export function GraphicGenerator() {
         sequenceLabels: eventSequenceRenderData.sequenceLabels,
         markerEvents: eventSequenceRenderData.markerEvents,
       };
-      renderEventSequenceMap(canvas, eventSequenceEvents, opts);
+      renderEventSequenceMap(canvas, eventSequenceEvents, opts, exportScale);
     } else if (graphicType === 'shotxg') {
       const opts: ShotMapOptions = {
         teamName: displayName,
@@ -646,14 +658,14 @@ export function GraphicGenerator() {
         teamColor,
         sizeBy,
       };
-      renderShotMap(canvas, filteredEvents, opts);
+      renderShotMap(canvas, filteredEvents, opts, exportScale);
     } else if (graphicType === 'heatmap') {
       const opts: HeatmapOptions = {
         teamName: displayName,
         subtitle: subtitle || '',
         teamColor,
       };
-      renderDefensiveHeatmap(canvas, filteredEvents, opts);
+      renderDefensiveHeatmap(canvas, filteredEvents, opts, exportScale);
     } else if (graphicType === 'midrecoveries') {
       const opts: MidRecoveriesOptions = {
         teamName: displayName,
@@ -667,7 +679,7 @@ export function GraphicGenerator() {
         showThirdsGuides: showMidThirds,
         showPenaltyLaneGuides: showMidPenaltyLanes,
       };
-      renderMidRecoveriesHeatmap(canvas, midRecoveriesEvents, opts);
+      renderMidRecoveriesHeatmap(canvas, midRecoveriesEvents, opts, exportScale);
     } else if (graphicType === 'firstsecondball') {
       const opts: FirstSecondBallMapOptions = {
         teamName: displayName,
@@ -680,7 +692,7 @@ export function GraphicGenerator() {
         team2Color: team2Color,
         gridStyle: firstSecondGridStyle,
       };
-      renderFirstSecondBallMap(canvas, firstSecondBallEvents, opts);
+      renderFirstSecondBallMap(canvas, firstSecondBallEvents, opts, exportScale);
     } else if (graphicType === 'matchreport') {
       const opts: MatchReportOptions = {
         team1Name: teams[0] || teamNames.team1 || 'Team 1',
@@ -689,7 +701,7 @@ export function GraphicGenerator() {
         team2Color: team2Color,
         subtitle: subtitle || '',
       };
-      renderMatchReport(canvas, reportEvents, opts);
+      renderMatchReport(canvas, reportEvents, opts, exportScale);
     } else if (graphicType === 'xgtimeline') {
       // Build XGTimelineEvents from events (both teams needed for timeline)
       const sourceEvents = dataSource === 'app' ? appGraphicEvents : csvEvents;
@@ -732,10 +744,10 @@ export function GraphicGenerator() {
         team2Color: team2Color,
         subtitle: subtitle || '',
       };
-      renderXGTimeline(canvas, xgEvents, opts);
+      renderXGTimeline(canvas, xgEvents, opts, exportScale);
     }
     setGenerated(true);
-  }, [graphicType, filteredEvents, playupFilteredEvents, driveSlipFilteredEvents, eventSequenceEvents, eventSequenceStyles, eventSequenceRenderData, selectedSequenceIds, midRecoveriesEvents, firstSecondBallEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, halfFilteredAppEvents, reportEvents, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle]);
+  }, [graphicType, filteredEvents, playupFilteredEvents, driveSlipFilteredEvents, eventSequenceEvents, eventSequenceStyles, eventSequenceRenderData, selectedSequenceIds, midRecoveriesEvents, firstSecondBallEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, halfFilteredAppEvents, reportEvents, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle, exportScale]);
 
   const exportPNG = useCallback(() => {
     const canvas = canvasRef.current;
@@ -751,9 +763,7 @@ export function GraphicGenerator() {
   // ── Generate a plot canvas for PDF inclusion ───────────────────────
   const generatePlotCanvas = useCallback(
     (plotType: string): { canvas: HTMLCanvasElement; width: number; height: number } | null => {
-      let w: number, h: number, renderer: (canvas: HTMLCanvasElement, events: GraphicEvent[], opts: any) => void, opts: any;
-
-      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2;
+      let w: number, h: number, renderer: (canvas: HTMLCanvasElement, events: any, opts: any, scaleFactor?: number) => void, opts: any;
 
       switch (plotType) {
         case 'playup':
@@ -831,18 +841,16 @@ export function GraphicGenerator() {
       }
 
       const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = w * dpr;
-      tempCanvas.height = h * dpr;
 
       try {
-        renderer(tempCanvas, filteredEvents, opts);
+        renderer(tempCanvas, filteredEvents, opts, exportScale);
         return { canvas: tempCanvas, width: w, height: h };
       } catch (e) {
         console.error(`Error rendering ${plotType}:`, e);
         return null;
       }
     },
-    [customTeamName, selectedPlayer, selectedTeam, teams, subtitle, teamColor, team2Color, sizeBy, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle, filteredEvents],
+    [customTeamName, selectedPlayer, selectedTeam, teams, subtitle, teamColor, team2Color, sizeBy, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle, filteredEvents, exportScale],
   );
 
   // ── Export PDF with match report and selected plots ────────────────
@@ -985,6 +993,23 @@ export function GraphicGenerator() {
           </select>
         </label>
 
+        {/* Export scale */}
+        <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
+          Export Scale
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min="0.5"
+              max="4"
+              step="0.5"
+              value={exportScale}
+              onChange={e => setExportScale(parseFloat(e.target.value))}
+              className="w-24"
+            />
+            <span className="w-12 text-sm text-gray-700 dark:text-gray-300 font-medium">{exportScale}x</span>
+          </div>
+        </label>
+
         {/* Team */}
         <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
           Team
@@ -1016,10 +1041,10 @@ export function GraphicGenerator() {
         </label>
 
         {graphicType === 'eventsequence' && (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 w-56 self-start">
             <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
               Sequences
-              <details className="relative w-56">
+              <details className="relative w-full">
                 <summary className="list-none cursor-pointer px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white select-none focus:outline-none">
                   {selectedSequenceLabel}
                 </summary>
@@ -1075,7 +1100,7 @@ export function GraphicGenerator() {
               </details>
             </label>
 
-            <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+            <label className="flex items-center gap-2 px-1 text-xs font-medium text-gray-600 dark:text-gray-400">
               <input
                 type="checkbox"
                 checked={includePlayupsInSequenceMap}
