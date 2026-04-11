@@ -35,6 +35,8 @@ export function EventRecordingPanel() {
     eventTypes,
     addEventType,
     deleteEventType,
+    eventTypeHotkeys,
+    setEventTypeHotkey,
     addPlayer,
     removePlayer,
     teamNames,
@@ -61,6 +63,7 @@ export function EventRecordingPanel() {
   const [rosterSearch, setRosterSearch] = useState('');
   const [editingTeam, setEditingTeam] = useState<TeamId | null>(null);
   const [editTeamName, setEditTeamName] = useState('');
+  const [assigningHotkeyFor, setAssigningHotkeyFor] = useState<string | null>(null);
   const [autoRecord, setAutoRecord] = useState<boolean>(() => {
     const stored = localStorage.getItem(AUTO_RECORD_STORAGE_KEY);
     if (stored === null) return false; // default off for new users
@@ -331,6 +334,76 @@ export function EventRecordingPanel() {
       setNewEventType('');
       setShowAddInput(false);
     }
+  };
+
+  const eventToHotkey = (event: KeyboardEvent): string => {
+    const key = event.key.toLowerCase();
+    if (key === 'shift' || key === 'control' || key === 'alt' || key === 'meta') {
+      return '';
+    }
+
+    const parts: string[] = [];
+    if (event.ctrlKey) parts.push('ctrl');
+    if (event.altKey) parts.push('alt');
+    if (event.shiftKey) parts.push('shift');
+    if (event.metaKey) parts.push('meta');
+    parts.push(key);
+    return parts.join('+');
+  };
+
+  useEffect(() => {
+    if (!assigningHotkeyFor) return;
+
+    const handleCaptureHotkey = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.key === 'Escape') {
+        setAssigningHotkeyFor(null);
+        return;
+      }
+
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        setEventTypeHotkey(assigningHotkeyFor, '');
+        setAssigningHotkeyFor(null);
+        return;
+      }
+
+      const hotkey = eventToHotkey(event);
+      if (!hotkey) return;
+
+      setEventTypeHotkey(assigningHotkeyFor, hotkey);
+      setAssigningHotkeyFor(null);
+    };
+
+    document.addEventListener('keydown', handleCaptureHotkey, true);
+    return () => document.removeEventListener('keydown', handleCaptureHotkey, true);
+  }, [assigningHotkeyFor, setEventTypeHotkey]);
+
+  useEffect(() => {
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (assigningHotkeyFor) return;
+
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) {
+        return;
+      }
+
+      const pressedKey = eventToHotkey(event);
+      if (!pressedKey) return;
+      const matchedEventType = Object.entries(eventTypeHotkeys).find(([, hotkey]) => hotkey === pressedKey)?.[0];
+      if (!matchedEventType) return;
+
+      event.preventDefault();
+      setSelectedEventType(selectedEventType === matchedEventType ? null : matchedEventType);
+    };
+
+    document.addEventListener('keydown', handleDocumentKeyDown);
+    return () => document.removeEventListener('keydown', handleDocumentKeyDown);
+  }, [assigningHotkeyFor, eventTypeHotkeys, selectedEventType, setSelectedEventType]);
+
+  const handleAssignHotkey = (type: string) => {
+    setAssigningHotkeyFor(prev => (prev === type ? null : type));
   };
 
   // Playup-aware player click handler
@@ -712,20 +785,36 @@ export function EventRecordingPanel() {
         <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
           Event
         </label>
+        {assigningHotkeyFor && (
+          <div className="mb-2 text-[11px] text-amber-700 dark:text-amber-300">
+            Press your hotkey for {assigningHotkeyFor}. Press Esc to cancel, Backspace/Delete to clear.
+          </div>
+        )}
         <div className="flex flex-wrap gap-1">
           {eventTypes.map((type) => (
-            <div key={type} className="relative group">
+            <div key={type} className="relative group flex items-start gap-1">
               <button
                 onClick={() => setSelectedEventType(selectedEventType === type ? null : type)}
                 className={`
-                  p-1.5 rounded text-sm font-bold transition-all duration-200
+                  p-1.5 rounded text-sm font-bold transition-all duration-200 flex flex-col items-center leading-none
                   ${selectedEventType === type
                     ? 'bg-navy dark:bg-rose text-white ring-1 ring-navy dark:ring-rose'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                   }
                 `}
+                title={`${type}${eventTypeHotkeys[type] ? ` • Hotkey: ${eventTypeHotkeys[type].toUpperCase()}` : ''}`}
               >
-                {type}
+                <span>{type}</span>
+                {eventTypeHotkeys[type] && (
+                  <span className="mt-0.5 text-[10px] font-medium opacity-80">{eventTypeHotkeys[type].toUpperCase()}</span>
+                )}
+              </button>
+              <button
+                onClick={() => handleAssignHotkey(type)}
+                className={`px-1.5 py-1 rounded text-[10px] font-semibold transition-colors ${assigningHotkeyFor === type ? 'bg-amber-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'}`}
+                title={assigningHotkeyFor === type ? `Press keys for ${type}` : `Set hotkey for ${type}`}
+              >
+                {assigningHotkeyFor === type ? 'Press...' : 'HK'}
               </button>
               <button
                 onClick={() => deleteEventType(type)}

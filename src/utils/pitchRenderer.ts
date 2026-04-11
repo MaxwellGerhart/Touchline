@@ -54,6 +54,12 @@ export interface EventSequenceStyle {
   lineWidth: number;
 }
 
+export interface CrossMapOptions {
+  teamName: string;
+  subtitle: string;
+  teamColor: string;
+}
+
 export interface EventSequenceMapOptions {
   teamName: string;
   subtitle: string;
@@ -713,6 +719,8 @@ function drawHalfPitch(
 
 export const PLAYUP_CANVAS_W = 2200;
 export const PLAYUP_CANVAS_H = 1600;
+export const CROSS_CANVAS_W = 1400;
+export const CROSS_CANVAS_H = 1300;
 
 export function renderPlayupMap(
   canvas: HTMLCanvasElement,
@@ -1007,6 +1015,126 @@ export function renderPlayupMap(
       align: 'center',
     });
   }
+}
+
+export function renderCrossMap(
+  canvas: HTMLCanvasElement,
+  events: GraphicEvent[],
+  options: CrossMapOptions,
+  scaleFactor?: number,
+): void {
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
+  const W = CROSS_CANVAS_W;
+  const H = CROSS_CANVAS_H;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(effectiveScale, effectiveScale);
+
+  const bg = SHOT_BG;
+  const fc = SHOT_TEXT;
+  const successColor = '#16a34a';
+  const failureColor = '#dc2626';
+
+  const getCrossOutcome = (eventType: string): 'success' | 'failure' | 'unknown' => {
+    const t = eventType.toLowerCase();
+    if (t.includes('(s)') || t.includes('successful')) return 'success';
+    if (t.includes('(u)') || t.includes('unsuccessful')) return 'failure';
+    return 'unknown';
+  };
+
+  const crosses = events.filter(e => e.eventType.toLowerCase().startsWith('cross'));
+  const successful = crosses.filter(e => getCrossOutcome(e.eventType) === 'success');
+  const unsuccessful = crosses.filter(e => getCrossOutcome(e.eventType) === 'failure');
+
+  const normalizedCrosses = crosses.map(cross => {
+    const hasEnd = !(cross.endX === 0 && cross.endY === 0);
+    const attacksLeft = hasEnd ? cross.endX < cross.startX : cross.startX < 50;
+    if (!attacksLeft) return cross;
+
+    return {
+      ...cross,
+      startX: 100 - cross.startX,
+      startY: 100 - cross.startY,
+      endX: hasEnd ? 100 - cross.endX : cross.endX,
+      endY: hasEnd ? 100 - cross.endY : cross.endY,
+    };
+  });
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const titleY = 50;
+  plainText(ctx, options.teamName, W / 2, titleY, options.teamColor || successColor, 64, {
+    weight: 'bold',
+    align: 'center',
+  });
+  plainText(ctx, options.subtitle, W / 2, titleY + 76, fc, 36, {
+    weight: 'bold',
+    align: 'center',
+  });
+
+  const legendY = 214;
+  let legendX = W * 0.16;
+  filledCircle(ctx, legendX, legendY + 6, 11, successColor, fc, 2);
+  plainText(ctx, `Successful (${successful.length})`, legendX + 22, legendY - 8, fc, 24);
+  legendX += ctx.measureText(`Successful (${successful.length})`).width + 70;
+  filledCircle(ctx, legendX, legendY + 6, 11, failureColor, fc, 2);
+  plainText(ctx, `Unsuccessful (${unsuccessful.length})`, legendX + 22, legendY - 8, fc, 24);
+
+  const pitchAspect = PW / (PL / 2);
+  const pitchPadX = 145;
+  const pitchPadTop = 280;
+  const pitchPadBot = 160;
+  const availW = W - pitchPadX * 2;
+  const availH = H - pitchPadTop - pitchPadBot;
+  let pitchW: number;
+  let pitchH: number;
+  if (availW / pitchAspect <= availH) {
+    pitchW = availW;
+    pitchH = availW / pitchAspect;
+  } else {
+    pitchH = availH;
+    pitchW = availH * pitchAspect;
+  }
+  const pitchRect: Rect = {
+    x: (W - pitchW) / 2,
+    y: pitchPadTop,
+    w: pitchW,
+    h: pitchH,
+  };
+  drawHalfPitch(ctx, pitchRect, bg, fc);
+
+  for (const cross of normalizedCrosses) {
+    const isSuccessful = getCrossOutcome(cross.eventType) === 'success';
+    const color = isSuccessful ? successColor : failureColor;
+    const [sx, sy] = optaHalf(cross.startX, cross.startY, pitchRect);
+    const hasEnd = !(cross.endX === 0 && cross.endY === 0);
+    const [ex, ey] = hasEnd ? optaHalf(cross.endX, cross.endY, pitchRect) : optaHalf(cross.startX, cross.startY, pitchRect);
+
+    drawArrow(ctx, sx, sy, ex, ey, color, 4.8, 15, bg);
+    filledCircle(ctx, sx, sy, 9, color, fc, 2);
+
+    if (hasEnd) {
+      if (isSuccessful) {
+        diamond(ctx, ex, ey, 10, color, fc, 2);
+      } else {
+        const size = 10;
+        line(ctx, ex - size, ey - size, ex + size, ey + size, color, 4);
+        line(ctx, ex - size, ey + size, ex + size, ey - size, color, 4);
+      }
+    }
+  }
+
+  const statsY = pitchRect.y + pitchRect.h + 44;
+  plainText(ctx, `Crosses (${crosses.length})`, W / 2, statsY, options.teamColor || successColor, 50, {
+    weight: 'bold',
+    align: 'center',
+  });
+  plainText(ctx, `${successful.length} successful • ${unsuccessful.length} unsuccessful`, W / 2, statsY + 52, fc, 28, {
+    align: 'center',
+  });
 }
 
 export function renderDriveSlipMap(

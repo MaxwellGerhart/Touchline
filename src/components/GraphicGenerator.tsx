@@ -9,6 +9,7 @@ import {
   EventSequenceStyle,
   EventSequenceLineStyle,
   ShotMapOptions,
+  CrossMapOptions,
   HeatmapOptions,
   MidRecoveriesOptions,
   FirstSecondBallMapOptions,
@@ -19,6 +20,7 @@ import {
   renderDriveSlipMap,
   renderEventSequenceMap,
   renderShotMap,
+  renderCrossMap,
   renderDefensiveHeatmap,
   renderMidRecoveriesHeatmap,
   renderFirstSecondBallMap,
@@ -26,6 +28,8 @@ import {
   renderMatchReport,
   PLAYUP_CANVAS_W,
   PLAYUP_CANVAS_H,
+  CROSS_CANVAS_W,
+  CROSS_CANVAS_H,
   SHOT_CANVAS_W,
   SHOT_CANVAS_H,
   HEATMAP_CANVAS_W,
@@ -39,7 +43,7 @@ import { computeShotFeatures, predictXg } from '../utils/xgModel';
 import { buildSequenceRenderData } from '../utils/sequences';
 import { generateMatchReportPDF } from '../utils/pdfExport';
 
-type GraphicType = 'playup' | 'driveslip' | 'eventsequence' | 'shotxg' | 'heatmap' | 'midrecoveries' | 'firstsecondball' | 'xgtimeline' | 'matchreport';
+type GraphicType = 'playup' | 'driveslip' | 'eventsequence' | 'shotxg' | 'crossmap' | 'heatmap' | 'midrecoveries' | 'firstsecondball' | 'xgtimeline' | 'matchreport';
 type DataSource = 'app' | 'csv';
 type HalfSelection = '1' | '2' | 'both';
 
@@ -566,6 +570,9 @@ export function GraphicGenerator() {
   const playupCount = playupFilteredEvents.filter(
     e => ['playup platform', 'playup aaa'].includes(e.eventType.toLowerCase()),
   ).length;
+  const crossCount = filteredEvents.filter(
+    e => e.eventType.toLowerCase().startsWith('cross'),
+  ).length;
   const driveSlipCount = driveSlipFilteredEvents.filter(
     e => ['drive', 'slip'].includes(e.eventType.toLowerCase()),
   ).length;
@@ -659,6 +666,13 @@ export function GraphicGenerator() {
         sizeBy,
       };
       renderShotMap(canvas, filteredEvents, opts, exportScale);
+    } else if (graphicType === 'crossmap') {
+      const opts: CrossMapOptions = {
+        teamName: displayName,
+        subtitle: subtitle || '',
+        teamColor,
+      };
+      renderCrossMap(canvas, filteredEvents, opts, exportScale);
     } else if (graphicType === 'heatmap') {
       const opts: HeatmapOptions = {
         teamName: displayName,
@@ -797,6 +811,16 @@ export function GraphicGenerator() {
             sizeBy,
           };
           break;
+        case 'crossmap':
+          w = CROSS_CANVAS_W;
+          h = CROSS_CANVAS_H;
+          renderer = renderCrossMap;
+          opts = {
+            teamName: customTeamName || selectedPlayer || selectedTeam || teams[0] || 'Team',
+            subtitle: subtitle || '',
+            teamColor,
+          };
+          break;
         case 'heatmap':
           w = HEATMAP_CANVAS_W;
           h = HEATMAP_CANVAS_H;
@@ -871,6 +895,7 @@ export function GraphicGenerator() {
             playup: 'Playup Map',
             driveslip: 'Drive + Slip Map',
             shotxg: 'Shot / xG Map',
+            crossmap: 'Cross Map',
             heatmap: 'Defensive Heatmap',
             midrecoveries: 'Mid Recoveries',
             firstsecondball: 'First + Second Ball',
@@ -915,8 +940,8 @@ export function GraphicGenerator() {
   ).length;
 
   // ── Canvas display dimensions ─────────────────────────────────────────
-  const canvasW = (graphicType === 'playup' || graphicType === 'driveslip' || graphicType === 'eventsequence') ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : graphicType === 'xgtimeline' ? XG_TIMELINE_W : graphicType === 'matchreport' ? REPORT_CANVAS_W : HEATMAP_CANVAS_W;
-  const canvasH = (graphicType === 'playup' || graphicType === 'driveslip' || graphicType === 'eventsequence') ? PLAYUP_CANVAS_H : graphicType === 'shotxg' ? SHOT_CANVAS_H : graphicType === 'xgtimeline' ? XG_TIMELINE_H : graphicType === 'matchreport' ? REPORT_CANVAS_H : HEATMAP_CANVAS_H;
+  const canvasW = (graphicType === 'playup' || graphicType === 'driveslip' || graphicType === 'eventsequence') ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : graphicType === 'crossmap' ? CROSS_CANVAS_W : graphicType === 'xgtimeline' ? XG_TIMELINE_W : graphicType === 'matchreport' ? REPORT_CANVAS_W : HEATMAP_CANVAS_W;
+  const canvasH = (graphicType === 'playup' || graphicType === 'driveslip' || graphicType === 'eventsequence') ? PLAYUP_CANVAS_H : graphicType === 'shotxg' ? SHOT_CANVAS_H : graphicType === 'crossmap' ? CROSS_CANVAS_H : graphicType === 'xgtimeline' ? XG_TIMELINE_H : graphicType === 'matchreport' ? REPORT_CANVAS_H : HEATMAP_CANVAS_H;
 
   // ═════════════════════════════════════════════════════════════════════
   //  Render
@@ -938,6 +963,7 @@ export function GraphicGenerator() {
             <option value="driveslip">Drive + Slip Map</option>
             <option value="eventsequence">Event Sequence Map</option>
             <option value="shotxg">Shot / xG Map</option>
+            <option value="crossmap">Cross Map</option>
             <option value="heatmap">Defensive Heatmap</option>
             <option value="midrecoveries">Mid Recoveries</option>
             <option value="firstsecondball">First + Second Ball Map</option>
@@ -1367,6 +1393,7 @@ export function GraphicGenerator() {
             (graphicType === 'driveslip' && driveSlipCount === 0) ||
             (graphicType === 'eventsequence' && eventSequenceCount === 0) ||
             (graphicType === 'shotxg' && shotCount === 0) ||
+            (graphicType === 'crossmap' && crossCount === 0) ||
             (graphicType === 'heatmap' && defCount === 0) ||
             (graphicType === 'midrecoveries' && midRecoveryCount === 0) ||
             (graphicType === 'firstsecondball' && firstSecondBallCount === 0) ||
@@ -1410,6 +1437,8 @@ export function GraphicGenerator() {
             ? `${eventSequenceCount} sequence event${eventSequenceCount !== 1 ? 's' : ''} in view`
             : graphicType === 'shotxg'
             ? `${shotCount} shot/goal event${shotCount !== 1 ? 's' : ''} available`
+            : graphicType === 'crossmap'
+            ? `${crossCount} cross event${crossCount !== 1 ? 's' : ''} available`
             : graphicType === 'xgtimeline'
             ? `${xgTimelineShotCount} shot/goal event${xgTimelineShotCount !== 1 ? 's' : ''} available`
             : graphicType === 'firstsecondball'
@@ -1432,6 +1461,7 @@ export function GraphicGenerator() {
                 { id: 'playup', label: 'Playup Map', count: playupCount },
                 { id: 'driveslip', label: 'Drive + Slip', count: driveSlipCount },
                 { id: 'shotxg', label: 'Shot / xG Map', count: shotCount },
+                { id: 'crossmap', label: 'Cross Map', count: crossCount },
                 { id: 'heatmap', label: 'Defensive Heatmap', count: defCount },
                 { id: 'midrecoveries', label: 'Mid Recoveries', count: midRecoveryCount },
                 { id: 'firstsecondball', label: 'First + Second Ball', count: firstSecondBallCount },

@@ -49,6 +49,8 @@ interface EventContextType {
   eventTypes: string[];
   addEventType: (type: string) => void;
   deleteEventType: (type: string) => void;
+  eventTypeHotkeys: Record<string, string>;
+  setEventTypeHotkey: (eventType: string, hotkey: string) => void;
   teamNames: TeamNames;
   updateTeamName: (team: TeamId, name: string) => void;
   playerDisplayMode: PlayerDisplayMode;
@@ -78,17 +80,28 @@ const EventContext = createContext<EventContextType | null>(null);
 const STORAGE_KEY = 'touchline_events';
 const PLAYERS_STORAGE_KEY = 'touchline_players';
 const EVENT_TYPES_STORAGE_KEY = 'touchline_event_types';
+const EVENT_TYPE_HOTKEYS_STORAGE_KEY = 'touchline_event_type_hotkeys';
 const TEAM_NAMES_STORAGE_KEY = 'touchline_team_names';
 const PLAYER_DISPLAY_MODE_STORAGE_KEY = 'touchline_player_display_mode';
 const ROSTERS_STORAGE_KEY = 'touchline_rosters';
 const ACTIVE_ROSTER_STORAGE_KEY = 'touchline_active_roster';
+
+function normalizeCrossEventType(eventType: string): string {
+  if (eventType === 'Cross') return 'Cross (S)';
+  if (eventType === 'Cross - Successful') return 'Cross (S)';
+  if (eventType === 'Cross - Unsuccessful') return 'Cross (U)';
+  return eventType;
+}
 
 export function EventProvider({ children }: { children: ReactNode }) {
   const [events, setEvents] = useState<MatchEvent[]>(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     const raw: MatchEvent[] = stored ? JSON.parse(stored) : [];
     // Migration shim: treat legacy 'Playup' events as 'Playup Platform'
-    return raw.map(e => e.eventType === 'Playup' ? { ...e, eventType: 'Playup Platform' } : e);
+    return raw.map(e => {
+      const playupMigrated = e.eventType === 'Playup' ? 'Playup Platform' : e.eventType;
+      return { ...e, eventType: normalizeCrossEventType(playupMigrated) };
+    });
   });
 
   const [players, setPlayers] = useState<Player[]>(() => {
@@ -98,7 +111,19 @@ export function EventProvider({ children }: { children: ReactNode }) {
 
   const [eventTypes, setEventTypes] = useState<string[]>(() => {
     const stored = localStorage.getItem(EVENT_TYPES_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : DEFAULT_EVENT_TYPES;
+    const initial = stored ? JSON.parse(stored) : DEFAULT_EVENT_TYPES;
+    return initial.map((type: string) => normalizeCrossEventType(type));
+  });
+
+  const [eventTypeHotkeys, setEventTypeHotkeys] = useState<Record<string, string>>(() => {
+    const stored = localStorage.getItem(EVENT_TYPE_HOTKEYS_STORAGE_KEY);
+    if (!stored) return {};
+    const raw = JSON.parse(stored) as Record<string, string>;
+    const migrated: Record<string, string> = {};
+    for (const [eventType, hotkey] of Object.entries(raw)) {
+      migrated[normalizeCrossEventType(eventType)] = hotkey;
+    }
+    return migrated;
   });
 
   const [teamNames, setTeamNames] = useState<TeamNames>(() => {
@@ -170,6 +195,10 @@ export function EventProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(EVENT_TYPES_STORAGE_KEY, JSON.stringify(eventTypes));
   }, [eventTypes]);
+
+  useEffect(() => {
+    localStorage.setItem(EVENT_TYPE_HOTKEYS_STORAGE_KEY, JSON.stringify(eventTypeHotkeys));
+  }, [eventTypeHotkeys]);
 
   // Persist team names to localStorage
   useEffect(() => {
@@ -392,10 +421,57 @@ export function EventProvider({ children }: { children: ReactNode }) {
 
   const deleteEventType = useCallback((type: string) => {
     setEventTypes(prev => prev.filter(t => t !== type));
+    setEventTypeHotkeys(prev => {
+      if (!(type in prev)) return prev;
+      const next = { ...prev };
+      delete next[type];
+      return next;
+    });
     if (selectedEventType === type) {
       setSelectedEventType(null);
     }
   }, [selectedEventType]);
+
+  const normalizeHotkey = (rawHotkey: string): string => {
+    const cleaned = rawHotkey.trim().toLowerCase().replace(/\s+/g, '');
+    if (!cleaned) return '';
+
+    const tokens = cleaned.split('+').filter(Boolean);
+    if (tokens.length === 0) return '';
+
+    const modSet = new Set(tokens.slice(0, -1));
+    const keyToken = tokens[tokens.length - 1]
+      .replace(/^key/, '')
+      .replace(/^digit/, '');
+
+    if (!keyToken) return '';
+
+    const ctrl = modSet.has('ctrl') || modSet.has('control');
+    const alt = modSet.has('alt') || modSet.has('option');
+    const shift = modSet.has('shift');
+    const meta = modSet.has('meta') || modSet.has('cmd') || modSet.has('command');
+
+    const parts: string[] = [];
+    if (ctrl) parts.push('ctrl');
+    if (alt) parts.push('alt');
+    if (shift) parts.push('shift');
+    if (meta) parts.push('meta');
+    parts.push(keyToken);
+    return parts.join('+');
+  };
+
+  const setEventTypeHotkey = useCallback((eventType: string, hotkey: string) => {
+    const normalized = normalizeHotkey(hotkey);
+    setEventTypeHotkeys(prev => {
+      const next = { ...prev };
+      if (!normalized) {
+        delete next[eventType];
+      } else {
+        next[eventType] = normalized;
+      }
+      return next;
+    });
+  }, []);
 
   const importEvents = useCallback((csvText: string): { added: number; skipped: number; error?: string } => {
     const parsed = parseCSV(csvText);
@@ -407,7 +483,10 @@ export function EventProvider({ children }: { children: ReactNode }) {
     }
 
     // Migration shim: treat legacy 'Playup' events as 'Playup Platform'
-    const migratedEvents = parsed.events.map(e => e.eventType === 'Playup' ? { ...e, eventType: 'Playup Platform' } : e);
+    const migratedEvents = parsed.events.map(e => {
+      const playupMigrated = e.eventType === 'Playup' ? 'Playup Platform' : e.eventType;
+      return { ...e, eventType: normalizeCrossEventType(playupMigrated) };
+    });
 
     // Merge events
     const { merged, added, skipped } = mergeEvents(events, migratedEvents);
@@ -490,6 +569,8 @@ export function EventProvider({ children }: { children: ReactNode }) {
         eventTypes,
         addEventType,
         deleteEventType,
+        eventTypeHotkeys,
+        setEventTypeHotkey,
         teamNames,
         updateTeamName,
         playerDisplayMode,
