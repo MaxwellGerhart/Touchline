@@ -1050,7 +1050,10 @@ export function renderCrossMap(
 
   const normalizedCrosses = crosses.map(cross => {
     const hasEnd = !(cross.endX === 0 && cross.endY === 0);
-    const attacksLeft = hasEnd ? cross.endX < cross.startX : cross.startX < 50;
+    // In half-pitch mode we normalize events to the attacking-right frame.
+    // Use average X so crosses entirely on the left side are mirrored reliably.
+    const avgX = hasEnd ? (cross.startX + cross.endX) / 2 : cross.startX;
+    const attacksLeft = avgX < 50;
     if (!attacksLeft) return cross;
 
     return {
@@ -1109,9 +1112,18 @@ export function renderCrossMap(
   for (const cross of normalizedCrosses) {
     const isSuccessful = getCrossOutcome(cross.eventType) === 'success';
     const color = isSuccessful ? successColor : failureColor;
-    const [sx, sy] = optaHalf(cross.startX, cross.startY, pitchRect);
+
+    const clampHalfX = (x: number) => Math.max(50, Math.min(100, x));
+    const clampY = (y: number) => Math.max(0, Math.min(100, y));
+
+    const startX = clampHalfX(cross.startX);
+    const startY = clampY(cross.startY);
+
+    const [sx, sy] = optaHalf(startX, startY, pitchRect);
     const hasEnd = !(cross.endX === 0 && cross.endY === 0);
-    const [ex, ey] = hasEnd ? optaHalf(cross.endX, cross.endY, pitchRect) : optaHalf(cross.startX, cross.startY, pitchRect);
+    const endX = hasEnd ? clampHalfX(cross.endX) : startX;
+    const endY = hasEnd ? clampY(cross.endY) : startY;
+    const [ex, ey] = optaHalf(endX, endY, pitchRect);
 
     drawArrow(ctx, sx, sy, ex, ey, color, 4.8, 15, bg);
     filledCircle(ctx, sx, sy, 9, color, fc, 2);
