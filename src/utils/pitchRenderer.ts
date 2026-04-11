@@ -2809,10 +2809,10 @@ export function renderXGTimeline(
 
   // Extend lines to max minute
   if (team1Points[team1Points.length - 1].minute < maxMin) {
-    team1Points.push({ ...team1Points[team1Points.length - 1], minute: maxMin });
+    team1Points.push({ ...team1Points[team1Points.length - 1], minute: maxMin, isGoal: false });
   }
   if (team2Points[team2Points.length - 1].minute < maxMin) {
-    team2Points.push({ ...team2Points[team2Points.length - 1], minute: maxMin });
+    team2Points.push({ ...team2Points[team2Points.length - 1], minute: maxMin, isGoal: false });
   }
 
   // Max xG for y-axis scaling
@@ -2950,8 +2950,8 @@ export function renderXGTimeline(
 
   // ── Final xG Summary ─────────────────────────────────────────────────
   const summaryY = chartBottom + 95;
-  const t1Goals = team1Points.filter(p => p.isGoal).length;
-  const t2Goals = team2Points.filter(p => p.isGoal).length;
+  const t1Goals = sorted.filter(ev => isTeam1(ev) && ev.eventType === 'Goal').length;
+  const t2Goals = sorted.filter(ev => !isTeam1(ev) && ev.eventType === 'Goal').length;
 
   const statsItems = [
     [options.team1Name, `${t1Goals} goal${t1Goals !== 1 ? 's' : ''}`, t1cumul.toFixed(2) + ' xG'],

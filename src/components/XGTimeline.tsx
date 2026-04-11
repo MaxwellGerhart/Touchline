@@ -75,8 +75,8 @@ export function XGTimeline() {
     const currentMin = matchMinute / 60;
     // Extend to current match minute for live feel
     const extendMin = Math.max(currentMin, t1[t1.length - 1].minute, t2[t2.length - 1].minute, 5);
-    t1.push({ ...t1[t1.length - 1], minute: extendMin });
-    t2.push({ ...t2[t2.length - 1], minute: extendMin });
+    t1.push({ ...t1[t1.length - 1], minute: extendMin, isGoal: false });
+    t2.push({ ...t2[t2.length - 1], minute: extendMin, isGoal: false });
 
     return {
       team1Points: t1,
@@ -123,8 +123,8 @@ export function XGTimeline() {
 
   const t1c = '#001E44';
   const t2c = '#C41E3A';
-  const t1Goals = team1Points.filter(p => p.isGoal).length;
-  const t2Goals = team2Points.filter(p => p.isGoal).length;
+  const t1Goals = timelineEvents.filter(ev => String(ev.team) === '1' && ev.eventType === 'Goal').length;
+  const t2Goals = timelineEvents.filter(ev => String(ev.team) !== '1' && ev.eventType === 'Goal').length;
   // Adjust the cumulative xG to not double-count the extended final point
   const t1Total = team1Points.length > 1 ? team1Points[team1Points.length - 2].cumulXg : 0;
   const t2Total = team2Points.length > 1 ? team2Points[team2Points.length - 2].cumulXg : 0;

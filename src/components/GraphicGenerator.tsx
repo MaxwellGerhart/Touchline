@@ -717,39 +717,36 @@ export function GraphicGenerator() {
       };
       renderMatchReport(canvas, reportEvents, opts, exportScale);
     } else if (graphicType === 'xgtimeline') {
-      // Build XGTimelineEvents from events (both teams needed for timeline)
-      const sourceEvents = dataSource === 'app' ? appGraphicEvents : csvEvents;
-      const xgEvents: XGTimelineEvent[] = sourceEvents
+      // Build XGTimelineEvents from one consistent source list to avoid minute/event mismatches.
+      const shotSourceEvents = (dataSource === 'app' ? appGraphicEvents : csvEvents)
         .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
-        .map(e => {
-          // Mirror shots attacking left so xG model always sees "attacking right"
-          let sx = e.startX;
-          let sy = e.startY;
-          if (e.endX < 50) {
-            sx = 100 - sx;
-            sy = 100 - sy;
-          }
-          const { dist, angle } = computeShotFeatures(sx, sy);
-          const xg = predictXg(dist, angle);
-          return {
-            matchMinute: 0,
-            eventType: e.eventType,
-            playerName: e.playerName,
-            team: e.playerTeam,
-            xg,
-          };
-        })
-        .map((e, i, arr) => ({ ...e, matchMinute: ((i + 1) / arr.length) * 90 }));
+        .sort((a, b) => {
+          const at = typeof a.videoTimestamp === 'number' ? a.videoTimestamp : Number.POSITIVE_INFINITY;
+          const bt = typeof b.videoTimestamp === 'number' ? b.videoTimestamp : Number.POSITIVE_INFINITY;
+          return at - bt;
+        });
 
-      // Also use real timestamps from in-app events when available
-      if (dataSource === 'app') {
-        const shotAppEvents = halfFilteredAppEvents
-          .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
-          .sort((a, b) => a.videoTimestamp - b.videoTimestamp);
-        for (let i = 0; i < xgEvents.length && i < shotAppEvents.length; i++) {
-          xgEvents[i].matchMinute = shotAppEvents[i].videoTimestamp / 60;
+      const xgEvents: XGTimelineEvent[] = shotSourceEvents.map((e, i, arr) => {
+        // Mirror shots attacking left so xG model always sees "attacking right"
+        let sx = e.startX;
+        let sy = e.startY;
+        if (e.endX < 50) {
+          sx = 100 - sx;
+          sy = 100 - sy;
         }
-      }
+
+        const { dist, angle } = computeShotFeatures(sx, sy);
+        const xg = predictXg(dist, angle);
+        const fallbackMinute = ((i + 1) / Math.max(arr.length, 1)) * 90;
+
+        return {
+          matchMinute: typeof e.videoTimestamp === 'number' ? e.videoTimestamp / 60 : fallbackMinute,
+          eventType: e.eventType,
+          playerName: e.playerName,
+          team: e.playerTeam,
+          xg,
+        };
+      });
 
       const opts: XGTimelineOptions = {
         team1Name: teams[0] || teamNames.team1 || 'Team 1',
@@ -761,7 +758,7 @@ export function GraphicGenerator() {
       renderXGTimeline(canvas, xgEvents, opts, exportScale);
     }
     setGenerated(true);
-  }, [graphicType, filteredEvents, playupFilteredEvents, driveSlipFilteredEvents, eventSequenceEvents, eventSequenceStyles, eventSequenceRenderData, selectedSequenceIds, midRecoveriesEvents, firstSecondBallEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, halfFilteredAppEvents, reportEvents, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle, exportScale]);
+  }, [graphicType, filteredEvents, playupFilteredEvents, driveSlipFilteredEvents, eventSequenceEvents, eventSequenceStyles, eventSequenceRenderData, selectedSequenceIds, midRecoveriesEvents, firstSecondBallEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, reportEvents, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle, exportScale]);
 
   const exportPNG = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1514,10 +1511,11 @@ export function GraphicGenerator() {
           <canvas
             ref={canvasRef}
             style={{
-              maxWidth: canvasW >= canvasH ? '600px' : '350px',
+              maxWidth: '700px',
               maxHeight: '65vh',
-              width: canvasW >= canvasH ? '100%' : 'auto',
-              height: canvasW >= canvasH ? 'auto' : '65vh',
+              width: 'auto',
+              height: 'auto',
+              aspectRatio: `${canvasW} / ${canvasH}`,
               borderRadius: 8,
               boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
             }}
