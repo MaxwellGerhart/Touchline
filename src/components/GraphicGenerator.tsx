@@ -39,7 +39,7 @@ import {
   REPORT_CANVAS_W,
   REPORT_CANVAS_H,
 } from '../utils/pitchRenderer';
-import { computeShotFeatures, predictXg } from '../utils/xgModel';
+import { computeShotFeatures, getXgForShot, isHeaderEventType, isShotLikeEventType } from '../utils/xgModel';
 import { buildSequenceRenderData } from '../utils/sequences';
 import { generateMatchReportPDF } from '../utils/pdfExport';
 
@@ -48,6 +48,24 @@ type DataSource = 'app' | 'csv';
 type HalfSelection = '1' | '2' | 'both';
 
 const HALF_DURATION_SEC = 45 * 60; // 2700 seconds
+const HALF_PITCH_ASPECT = 68 / 52.5;
+const SHOT_PITCH_RECT = {
+  x: 80,
+  y: 380,
+  w: SHOT_CANVAS_W - 160,
+  h: Math.min((SHOT_CANVAS_W - 160) / HALF_PITCH_ASPECT, SHOT_CANVAS_H - 700),
+};
+
+interface ShotPreviewPoint {
+  id: string;
+  cx: number;
+  cy: number;
+  r: number;
+  xg: number;
+  playerName: string;
+  minuteLabel: string;
+  shotType: 'Shot' | 'Header' | 'Goal';
+}
 
 // ── CSV parser ──────────────────────────────────────────────────────────────
 
@@ -140,9 +158,12 @@ export function GraphicGenerator() {
   const [showPdfOptions, setShowPdfOptions] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [exportScale, setExportScale] = useState(2.5);
+  const [hoveredShotId, setHoveredShotId] = useState<string | null>(null);
+  const [lockedShotId, setLockedShotId] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewWrapRef = useRef<HTMLDivElement>(null);
 
   // ── Derived data ──────────────────────────────────────────────────────
 
@@ -578,7 +599,7 @@ export function GraphicGenerator() {
   ).length;
   const eventSequenceCount = eventSequenceEvents.length;
   const shotCount = filteredEvents.filter(
-    e => e.eventType === 'Shot' || e.eventType === 'Goal',
+    e => isShotLikeEventType(e.eventType),
   ).length;
   const defCount = filteredEvents.filter(
     e => e.eventType === 'Tackle' || e.eventType === 'Interception',
@@ -719,7 +740,7 @@ export function GraphicGenerator() {
     } else if (graphicType === 'xgtimeline') {
       // Build XGTimelineEvents from one consistent source list to avoid minute/event mismatches.
       const shotSourceEvents = (dataSource === 'app' ? appGraphicEvents : csvEvents)
-        .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
+        .filter(e => isShotLikeEventType(e.eventType))
         .sort((a, b) => {
           const at = typeof a.videoTimestamp === 'number' ? a.videoTimestamp : Number.POSITIVE_INFINITY;
           const bt = typeof b.videoTimestamp === 'number' ? b.videoTimestamp : Number.POSITIVE_INFINITY;
@@ -735,8 +756,7 @@ export function GraphicGenerator() {
           sy = 100 - sy;
         }
 
-        const { dist, angle } = computeShotFeatures(sx, sy);
-        const xg = predictXg(dist, angle);
+        const xg = getXgForShot(sx, sy, e.eventType);
         const fallbackMinute = ((i + 1) / Math.max(arr.length, 1)) * 90;
 
         return {
@@ -933,8 +953,129 @@ export function GraphicGenerator() {
 
   // ── Relevant xG timeline shot count (uses all events, not team-filtered) ──
   const xgTimelineShotCount = allEvents.filter(
-    e => e.eventType === 'Shot' || e.eventType === 'Goal',
+    e => isShotLikeEventType(e.eventType),
   ).length;
+
+  const shotPreviewPoints: ShotPreviewPoint[] = useMemo(() => {
+    const pitchRect = SHOT_PITCH_RECT;
+    return filteredEvents
+      .filter(e => isShotLikeEventType(e.eventType))
+      .map((e, idx) => {
+        let sx = e.startX;
+        let sy = e.startY;
+        let ex = e.endX;
+
+        if (ex < 50) {
+          sx = 100 - sx;
+          sy = 100 - sy;
+          ex = 100 - ex;
+        }
+
+        const xg = getXgForShot(sx, sy, e.eventType);
+        const { dist } = computeShotFeatures(sx, sy, e.eventType);
+        const size = sizeBy === 'xg' ? xg * 1000 + 60 : 600 * (1 - dist / 50) + 80;
+        const radius = Math.max(6, Math.sqrt(size / Math.PI) * 1.5);
+        const cx = pitchRect.x + (sy / 100) * pitchRect.w;
+        const cy = pitchRect.y + ((100 - sx) / 50) * pitchRect.h;
+        const shotType: 'Shot' | 'Header' | 'Goal' =
+          e.eventType === 'Goal' ? 'Goal' : (isHeaderEventType(e.eventType) ? 'Header' : 'Shot');
+        const minuteLabel = typeof e.videoTimestamp === 'number'
+          ? `${Math.round(e.videoTimestamp / 60)}'`
+          : 'N/A';
+
+        return {
+          id: `${e.eventType}-${e.playerName}-${e.videoTimestamp ?? idx}-${idx}`,
+          cx,
+          cy,
+          r: radius,
+          xg,
+          playerName: e.playerName || 'Unknown',
+          minuteLabel,
+          shotType,
+        };
+      });
+  }, [filteredEvents, sizeBy]);
+
+  const activeShotId = lockedShotId ?? hoveredShotId;
+  const activeShotPoint = useMemo(
+    () => shotPreviewPoints.find(p => p.id === activeShotId) ?? null,
+    [shotPreviewPoints, activeShotId],
+  );
+
+  const findShotPointAtClientPosition = useCallback((clientX: number, clientY: number): ShotPreviewPoint | null => {
+    const canvas = canvasRef.current;
+    if (!canvas || shotPreviewPoints.length === 0) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+
+    const canvasX = ((clientX - rect.left) / rect.width) * SHOT_CANVAS_W;
+    const canvasY = ((clientY - rect.top) / rect.height) * SHOT_CANVAS_H;
+
+    let best: ShotPreviewPoint | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+
+    for (const point of shotPreviewPoints) {
+      const dx = canvasX - point.cx;
+      const dy = canvasY - point.cy;
+      const dist = Math.hypot(dx, dy);
+      const hitRadius = Math.max(14, point.r + 8);
+
+      if (dist <= hitRadius && dist < bestDist) {
+        best = point;
+        bestDist = dist;
+      }
+    }
+
+    return best;
+  }, [shotPreviewPoints]);
+
+  const handleShotMapMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (lockedShotId) return;
+    const point = findShotPointAtClientPosition(e.clientX, e.clientY);
+    setHoveredShotId(point?.id ?? null);
+  }, [findShotPointAtClientPosition, lockedShotId]);
+
+  const handleShotMapMouseLeave = useCallback(() => {
+    if (!lockedShotId) {
+      setHoveredShotId(null);
+    }
+  }, [lockedShotId]);
+
+  const handleShotMapClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const point = findShotPointAtClientPosition(e.clientX, e.clientY);
+    if (!point) {
+      setLockedShotId(null);
+      setHoveredShotId(null);
+      return;
+    }
+
+    setLockedShotId(prev => (prev === point.id ? null : point.id));
+    setHoveredShotId(point.id);
+  }, [findShotPointAtClientPosition]);
+
+  const handleShotMapTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+
+    const point = findShotPointAtClientPosition(touch.clientX, touch.clientY);
+    if (!point) {
+      setLockedShotId(null);
+      setHoveredShotId(null);
+      return;
+    }
+
+    e.preventDefault();
+    setLockedShotId(prev => (prev === point.id ? null : point.id));
+    setHoveredShotId(point.id);
+  }, [findShotPointAtClientPosition]);
+
+  useEffect(() => {
+    if (graphicType !== 'shotxg' || !generated) {
+      setHoveredShotId(null);
+      setLockedShotId(null);
+    }
+  }, [graphicType, generated]);
 
   // ── Canvas display dimensions ─────────────────────────────────────────
   const canvasW = (graphicType === 'playup' || graphicType === 'driveslip' || graphicType === 'eventsequence') ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : graphicType === 'crossmap' ? CROSS_CANVAS_W : graphicType === 'xgtimeline' ? XG_TIMELINE_W : graphicType === 'matchreport' ? REPORT_CANVAS_W : HEATMAP_CANVAS_W;
@@ -1433,11 +1574,11 @@ export function GraphicGenerator() {
             : graphicType === 'eventsequence'
             ? `${eventSequenceCount} sequence event${eventSequenceCount !== 1 ? 's' : ''} in view`
             : graphicType === 'shotxg'
-            ? `${shotCount} shot/goal event${shotCount !== 1 ? 's' : ''} available`
+            ? `${shotCount} shot/header/goal event${shotCount !== 1 ? 's' : ''} available`
             : graphicType === 'crossmap'
             ? `${crossCount} cross event${crossCount !== 1 ? 's' : ''} available`
             : graphicType === 'xgtimeline'
-            ? `${xgTimelineShotCount} shot/goal event${xgTimelineShotCount !== 1 ? 's' : ''} available`
+            ? `${xgTimelineShotCount} shot/header/goal event${xgTimelineShotCount !== 1 ? 's' : ''} available`
             : graphicType === 'firstsecondball'
             ? `${firstSecondBallCount} first/second ball event${firstSecondBallCount !== 1 ? 's' : ''} available`
             : graphicType === 'matchreport'
@@ -1508,18 +1649,56 @@ export function GraphicGenerator() {
             <p className="text-sm">Configure settings above and click <strong>Generate</strong></p>
           </div>
         ) : (
-          <canvas
-            ref={canvasRef}
-            style={{
-              maxWidth: '700px',
-              maxHeight: '65vh',
-              width: 'auto',
-              height: 'auto',
-              aspectRatio: `${canvasW} / ${canvasH}`,
-              borderRadius: 8,
-              boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
-            }}
-          />
+          <div ref={previewWrapRef} className="relative inline-block">
+            <canvas
+              ref={canvasRef}
+              onMouseMove={graphicType === 'shotxg' ? handleShotMapMouseMove : undefined}
+              onMouseLeave={graphicType === 'shotxg' ? handleShotMapMouseLeave : undefined}
+              onClick={graphicType === 'shotxg' ? handleShotMapClick : undefined}
+              onTouchStart={graphicType === 'shotxg' ? handleShotMapTouchStart : undefined}
+              style={{
+                maxWidth: '700px',
+                maxHeight: '65vh',
+                width: 'auto',
+                height: 'auto',
+                aspectRatio: `${canvasW} / ${canvasH}`,
+                borderRadius: 8,
+                boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
+                cursor: graphicType === 'shotxg' ? 'pointer' : 'default',
+                touchAction: graphicType === 'shotxg' ? 'manipulation' : 'auto',
+              }}
+            />
+
+            {graphicType === 'shotxg' && activeShotPoint && (
+              <>
+                <div
+                  className="pointer-events-none absolute z-20 rounded-full border-2 border-orange-500"
+                  style={{
+                    left: `${(activeShotPoint.cx / SHOT_CANVAS_W) * 100}%`,
+                    top: `${(activeShotPoint.cy / SHOT_CANVAS_H) * 100}%`,
+                    width: `${Math.max(16, activeShotPoint.r * 2)}px`,
+                    height: `${Math.max(16, activeShotPoint.r * 2)}px`,
+                    transform: 'translate(-50%, -50%)',
+                    boxShadow: '0 0 0 2px rgba(255,255,255,0.55)',
+                  }}
+                />
+
+                <div
+                  className="pointer-events-none absolute z-30 min-w-[170px] rounded-lg border border-gray-200 bg-white/95 px-3 py-2 text-xs shadow-xl dark:border-gray-700 dark:bg-gray-900/95"
+                  style={{
+                    left: `${(activeShotPoint.cx / SHOT_CANVAS_W) * 100}%`,
+                    top: `${(activeShotPoint.cy / SHOT_CANVAS_H) * 100}%`,
+                    transform: 'translate(-50%, calc(-100% - 14px))',
+                  }}
+                >
+                  <p className="font-semibold text-gray-900 dark:text-white">{activeShotPoint.playerName}</p>
+                  <p className="text-gray-600 dark:text-gray-300">Minute: {activeShotPoint.minuteLabel}</p>
+                  <p className="text-gray-600 dark:text-gray-300">Type: {activeShotPoint.shotType}</p>
+                  <p className="font-semibold text-orange-600 dark:text-orange-400">xG: {activeShotPoint.xg.toFixed(2)}</p>
+                </div>
+              </>
+            )}
+          </div>
         )}
         {/* Hidden canvas for initial render  */}
         {!generated && (

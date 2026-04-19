@@ -5,7 +5,7 @@
  * PlayupGraphic.ipynb and xGandShotmap.ipynb notebook outputs.
  */
 
-import { computeShotFeatures, predictXg } from './xgModel';
+import { computeShotFeatures, isShotLikeEventType, predictXg } from './xgModel';
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Types
@@ -1794,7 +1794,7 @@ export function renderShotMap(
 
   // ── Prepare shot data ─────────────────────────────────────────────────
   const shots = events
-    .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
+    .filter(e => isShotLikeEventType(e.eventType))
     .map(e => {
       let sx = e.startX;
       let sy = e.startY;
@@ -1807,8 +1807,8 @@ export function renderShotMap(
         ex = 100 - ex;
       }
 
-      const { dist, angle } = computeShotFeatures(sx, sy);
-      const xg = predictXg(dist, angle);
+      const { dist, angle, isHeader, inBounds } = computeShotFeatures(sx, sy, e.eventType);
+      const xg = predictXg(dist, angle, isHeader, inBounds);
       const isGoal = e.eventType === 'Goal';
       const size =
         options.sizeBy === 'xg'
@@ -2781,7 +2781,7 @@ export function renderXGTimeline(
 
   // ── Separate events by team ───────────────────────────────────────────
   const sorted = [...events]
-    .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
+    .filter(e => isShotLikeEventType(e.eventType))
     .sort((a, b) => a.matchMinute - b.matchMinute);
 
   const isTeam1 = (e: XGTimelineEvent) => {

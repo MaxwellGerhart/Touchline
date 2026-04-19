@@ -2,7 +2,7 @@ import { useMemo, useRef, useCallback } from 'react';
 import { Download } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
 import { useTimer } from '../context/TimerContext';
-import { computeShotFeatures, predictXg } from '../utils/xgModel';
+import { getXgForShot, isShotLikeEventType } from '../utils/xgModel';
 import {
   renderXGTimeline,
   XGTimelineEvent,
@@ -26,7 +26,7 @@ export function XGTimeline() {
   // ── Derive xG timeline events from match events ──────────────────────
   const timelineEvents: XGTimelineEvent[] = useMemo(() => {
     return events
-      .filter(e => e.eventType === 'Shot' || e.eventType === 'Goal')
+      .filter(e => isShotLikeEventType(e.eventType))
       .map(e => {
         // Mirror shots attacking left so xG model always sees "attacking right"
         let sx = e.startLocation.x;
@@ -35,8 +35,7 @@ export function XGTimeline() {
           sx = 100 - sx;
           sy = 100 - sy;
         }
-        const { dist, angle } = computeShotFeatures(sx, sy);
-        const xg = predictXg(dist, angle);
+        const xg = getXgForShot(sx, sy, e.eventType);
         return {
           matchMinute: e.videoTimestamp / 60, // convert seconds to minutes
           eventType: e.eventType,
