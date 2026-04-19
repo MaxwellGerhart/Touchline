@@ -10,6 +10,7 @@ import {
   EventSequenceLineStyle,
   ShotMapOptions,
   CrossMapOptions,
+  PassMapOptions,
   HeatmapOptions,
   MidRecoveriesOptions,
   FirstSecondBallMapOptions,
@@ -21,6 +22,7 @@ import {
   renderEventSequenceMap,
   renderShotMap,
   renderCrossMap,
+  renderPassMap,
   renderDefensiveHeatmap,
   renderMidRecoveriesHeatmap,
   renderFirstSecondBallMap,
@@ -30,6 +32,8 @@ import {
   PLAYUP_CANVAS_H,
   CROSS_CANVAS_W,
   CROSS_CANVAS_H,
+  PASS_CANVAS_W,
+  PASS_CANVAS_H,
   SHOT_CANVAS_W,
   SHOT_CANVAS_H,
   HEATMAP_CANVAS_W,
@@ -43,7 +47,7 @@ import { computeShotFeatures, getXgForShot, isHeaderEventType, isShotLikeEventTy
 import { buildSequenceRenderData } from '../utils/sequences';
 import { generateMatchReportPDF } from '../utils/pdfExport';
 
-type GraphicType = 'playup' | 'driveslip' | 'eventsequence' | 'shotxg' | 'crossmap' | 'heatmap' | 'midrecoveries' | 'firstsecondball' | 'xgtimeline' | 'matchreport';
+type GraphicType = 'playup' | 'driveslip' | 'eventsequence' | 'shotxg' | 'crossmap' | 'passmap' | 'heatmap' | 'midrecoveries' | 'firstsecondball' | 'xgtimeline' | 'matchreport';
 type DataSource = 'app' | 'csv';
 type HalfSelection = '1' | '2' | 'both';
 
@@ -65,6 +69,11 @@ interface ShotPreviewPoint {
   playerName: string;
   minuteLabel: string;
   shotType: 'Shot' | 'Header' | 'Goal';
+}
+
+function isPassMapEventType(eventType: string): boolean {
+  const t = eventType.trim().toLowerCase();
+  return t === 'pass (s)' || t === 'pass (u)' || t === 'pass successful' || t === 'pass unsuccessful';
 }
 
 // ── CSV parser ──────────────────────────────────────────────────────────────
@@ -501,6 +510,24 @@ export function GraphicGenerator() {
     });
   }, [dataSource, filteredEvents]);
 
+  // Pass map: normalize direction by mirroring second-half in-app events.
+  const passMapEvents: GraphicEvent[] = useMemo(() => {
+    const passEvents = filteredEvents.filter(e => isPassMapEventType(e.eventType));
+    if (dataSource !== 'app') return passEvents;
+    return passEvents.map(e => {
+      if (typeof e.videoTimestamp !== 'number' || e.videoTimestamp < HALF_DURATION_SEC) {
+        return e;
+      }
+      return {
+        ...e,
+        startX: 100 - e.startX,
+        startY: 100 - e.startY,
+        endX: 100 - e.endX,
+        endY: 100 - e.endY,
+      };
+    });
+  }, [dataSource, filteredEvents]);
+
   // Playup-specific filtered events: include pass events where the selected
   // player was either the passer OR the receiver (matched via coordinates).
   const playupFilteredEvents: GraphicEvent[] = useMemo(() => {
@@ -593,6 +620,9 @@ export function GraphicGenerator() {
   ).length;
   const crossCount = filteredEvents.filter(
     e => e.eventType.toLowerCase().startsWith('cross'),
+  ).length;
+  const passCount = filteredEvents.filter(
+    e => isPassMapEventType(e.eventType),
   ).length;
   const driveSlipCount = driveSlipFilteredEvents.filter(
     e => ['drive', 'slip'].includes(e.eventType.toLowerCase()),
@@ -694,6 +724,13 @@ export function GraphicGenerator() {
         teamColor,
       };
       renderCrossMap(canvas, filteredEvents, opts, exportScale);
+    } else if (graphicType === 'passmap') {
+      const opts: PassMapOptions = {
+        teamName: displayName,
+        subtitle: subtitle || '',
+        teamColor,
+      };
+      renderPassMap(canvas, passMapEvents, opts, exportScale);
     } else if (graphicType === 'heatmap') {
       const opts: HeatmapOptions = {
         teamName: displayName,
@@ -778,7 +815,7 @@ export function GraphicGenerator() {
       renderXGTimeline(canvas, xgEvents, opts, exportScale);
     }
     setGenerated(true);
-  }, [graphicType, filteredEvents, playupFilteredEvents, driveSlipFilteredEvents, eventSequenceEvents, eventSequenceStyles, eventSequenceRenderData, selectedSequenceIds, midRecoveriesEvents, firstSecondBallEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, reportEvents, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle, exportScale]);
+  }, [graphicType, filteredEvents, playupFilteredEvents, driveSlipFilteredEvents, eventSequenceEvents, eventSequenceStyles, eventSequenceRenderData, selectedSequenceIds, midRecoveriesEvents, firstSecondBallEvents, passMapEvents, selectedTeam, selectedPlayer, teams, subtitle, teamColor, team2Color, sizeBy, customTeamName, teamNames, dataSource, appGraphicEvents, csvEvents, reportEvents, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle, exportScale]);
 
   const exportPNG = useCallback(() => {
     const canvas = canvasRef.current;
@@ -838,6 +875,16 @@ export function GraphicGenerator() {
             teamColor,
           };
           break;
+        case 'passmap':
+          w = PASS_CANVAS_W;
+          h = PASS_CANVAS_H;
+          renderer = renderPassMap;
+          opts = {
+            teamName: customTeamName || selectedPlayer || selectedTeam || teams[0] || 'Team',
+            subtitle: subtitle || '',
+            teamColor,
+          };
+          break;
         case 'heatmap':
           w = HEATMAP_CANVAS_W;
           h = HEATMAP_CANVAS_H;
@@ -882,16 +929,17 @@ export function GraphicGenerator() {
       }
 
       const tempCanvas = document.createElement('canvas');
+      const eventsToRender = plotType === 'passmap' ? passMapEvents : filteredEvents;
 
       try {
-        renderer(tempCanvas, filteredEvents, opts, exportScale);
+        renderer(tempCanvas, eventsToRender, opts, exportScale);
         return { canvas: tempCanvas, width: w, height: h };
       } catch (e) {
         console.error(`Error rendering ${plotType}:`, e);
         return null;
       }
     },
-    [customTeamName, selectedPlayer, selectedTeam, teams, subtitle, teamColor, team2Color, sizeBy, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle, filteredEvents, exportScale],
+    [customTeamName, selectedPlayer, selectedTeam, teams, subtitle, teamColor, team2Color, sizeBy, showMidGuides, showMidPlayerNames, midGuideColor, midGuideStyle, midGuideWidth, showMidThirds, showMidPenaltyLanes, firstSecondGridStyle, filteredEvents, passMapEvents, exportScale],
   );
 
   // ── Export PDF with match report and selected plots ────────────────
@@ -913,6 +961,7 @@ export function GraphicGenerator() {
             driveslip: 'Drive + Slip Map',
             shotxg: 'Shot / xG Map',
             crossmap: 'Cross Map',
+            passmap: 'Pass Map',
             heatmap: 'Defensive Heatmap',
             midrecoveries: 'Mid Recoveries',
             firstsecondball: 'First + Second Ball',
@@ -1078,8 +1127,8 @@ export function GraphicGenerator() {
   }, [graphicType, generated]);
 
   // ── Canvas display dimensions ─────────────────────────────────────────
-  const canvasW = (graphicType === 'playup' || graphicType === 'driveslip' || graphicType === 'eventsequence') ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : graphicType === 'crossmap' ? CROSS_CANVAS_W : graphicType === 'xgtimeline' ? XG_TIMELINE_W : graphicType === 'matchreport' ? REPORT_CANVAS_W : HEATMAP_CANVAS_W;
-  const canvasH = (graphicType === 'playup' || graphicType === 'driveslip' || graphicType === 'eventsequence') ? PLAYUP_CANVAS_H : graphicType === 'shotxg' ? SHOT_CANVAS_H : graphicType === 'crossmap' ? CROSS_CANVAS_H : graphicType === 'xgtimeline' ? XG_TIMELINE_H : graphicType === 'matchreport' ? REPORT_CANVAS_H : HEATMAP_CANVAS_H;
+  const canvasW = (graphicType === 'playup' || graphicType === 'driveslip' || graphicType === 'eventsequence') ? PLAYUP_CANVAS_W : graphicType === 'shotxg' ? SHOT_CANVAS_W : graphicType === 'crossmap' ? CROSS_CANVAS_W : graphicType === 'passmap' ? PASS_CANVAS_W : graphicType === 'xgtimeline' ? XG_TIMELINE_W : graphicType === 'matchreport' ? REPORT_CANVAS_W : HEATMAP_CANVAS_W;
+  const canvasH = (graphicType === 'playup' || graphicType === 'driveslip' || graphicType === 'eventsequence') ? PLAYUP_CANVAS_H : graphicType === 'shotxg' ? SHOT_CANVAS_H : graphicType === 'crossmap' ? CROSS_CANVAS_H : graphicType === 'passmap' ? PASS_CANVAS_H : graphicType === 'xgtimeline' ? XG_TIMELINE_H : graphicType === 'matchreport' ? REPORT_CANVAS_H : HEATMAP_CANVAS_H;
 
   // ═════════════════════════════════════════════════════════════════════
   //  Render
@@ -1102,8 +1151,9 @@ export function GraphicGenerator() {
             <option value="eventsequence">Event Sequence Map</option>
             <option value="shotxg">Shot / xG Map</option>
             <option value="crossmap">Cross Map</option>
+            <option value="passmap">Pass Map</option>
             <option value="heatmap">Defensive Heatmap</option>
-            <option value="midrecoveries">Mid Recoveries</option>
+            <option value="midrecoveries">Mid Recoveries Map</option>
             <option value="firstsecondball">First + Second Ball Map</option>
             <option value="xgtimeline">xG Timeline</option>
             <option value="matchreport">Match Report</option>
@@ -1532,6 +1582,7 @@ export function GraphicGenerator() {
             (graphicType === 'eventsequence' && eventSequenceCount === 0) ||
             (graphicType === 'shotxg' && shotCount === 0) ||
             (graphicType === 'crossmap' && crossCount === 0) ||
+            (graphicType === 'passmap' && passCount === 0) ||
             (graphicType === 'heatmap' && defCount === 0) ||
             (graphicType === 'midrecoveries' && midRecoveryCount === 0) ||
             (graphicType === 'firstsecondball' && firstSecondBallCount === 0) ||
@@ -1577,6 +1628,8 @@ export function GraphicGenerator() {
             ? `${shotCount} shot/header/goal event${shotCount !== 1 ? 's' : ''} available`
             : graphicType === 'crossmap'
             ? `${crossCount} cross event${crossCount !== 1 ? 's' : ''} available`
+            : graphicType === 'passmap'
+            ? `${passCount} pass event${passCount !== 1 ? 's' : ''} available`
             : graphicType === 'xgtimeline'
             ? `${xgTimelineShotCount} shot/header/goal event${xgTimelineShotCount !== 1 ? 's' : ''} available`
             : graphicType === 'firstsecondball'
@@ -1600,6 +1653,7 @@ export function GraphicGenerator() {
                 { id: 'driveslip', label: 'Drive + Slip', count: driveSlipCount },
                 { id: 'shotxg', label: 'Shot / xG Map', count: shotCount },
                 { id: 'crossmap', label: 'Cross Map', count: crossCount },
+                { id: 'passmap', label: 'Pass Map', count: passCount },
                 { id: 'heatmap', label: 'Defensive Heatmap', count: defCount },
                 { id: 'midrecoveries', label: 'Mid Recoveries', count: midRecoveryCount },
                 { id: 'firstsecondball', label: 'First + Second Ball', count: firstSecondBallCount },

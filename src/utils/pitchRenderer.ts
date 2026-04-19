@@ -60,6 +60,12 @@ export interface CrossMapOptions {
   teamColor: string;
 }
 
+export interface PassMapOptions {
+  teamName: string;
+  subtitle: string;
+  teamColor: string;
+}
+
 export interface EventSequenceMapOptions {
   teamName: string;
   subtitle: string;
@@ -721,6 +727,8 @@ export const PLAYUP_CANVAS_W = 2200;
 export const PLAYUP_CANVAS_H = 1600;
 export const CROSS_CANVAS_W = 1400;
 export const CROSS_CANVAS_H = 1300;
+export const PASS_CANVAS_W = 2200;
+export const PASS_CANVAS_H = 1600;
 
 export function renderPlayupMap(
   canvas: HTMLCanvasElement,
@@ -1147,6 +1155,156 @@ export function renderCrossMap(
   plainText(ctx, `${successful.length} successful • ${unsuccessful.length} unsuccessful`, W / 2, statsY + 52, fc, 28, {
     align: 'center',
   });
+}
+
+export function renderPassMap(
+  canvas: HTMLCanvasElement,
+  events: GraphicEvent[],
+  options: PassMapOptions,
+  scaleFactor?: number,
+): void {
+  const HALF_DURATION_SEC = 45 * 60;
+  const effectiveScale = scaleFactor ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2);
+  const W = PASS_CANVAS_W;
+  const H = PASS_CANVAS_H;
+  canvas.width = W * effectiveScale;
+  canvas.height = H * effectiveScale;
+
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(effectiveScale, effectiveScale);
+
+  const bg = SHOT_BG;
+  const fc = SHOT_TEXT;
+  const successColor = '#16a34a';
+  const failureColor = '#dc2626';
+
+  const isPassEventType = (eventType: string): boolean => {
+    const t = eventType.trim().toLowerCase();
+    return t === 'pass (s)' || t === 'pass (u)' || t === 'pass successful' || t === 'pass unsuccessful';
+  };
+
+  const getPassOutcome = (eventType: string): 'success' | 'failure' | 'unknown' => {
+    const t = eventType.toLowerCase();
+    if (t.includes('(s)') || t.includes('successful')) return 'success';
+    if (t.includes('(u)') || t.includes('unsuccessful')) return 'failure';
+    return 'unknown';
+  };
+
+  const rawPasses = events.filter(e => isPassEventType(e.eventType));
+
+  // Normalize second-half events so directional interpretation is consistent.
+  const passes = rawPasses.map(pass => {
+    if (typeof pass.videoTimestamp !== 'number' || pass.videoTimestamp < HALF_DURATION_SEC) {
+      return pass;
+    }
+
+    return {
+      ...pass,
+      startX: 100 - pass.startX,
+      startY: 100 - pass.startY,
+      endX: 100 - pass.endX,
+      endY: 100 - pass.endY,
+    };
+  });
+
+  const successful = passes.filter(e => getPassOutcome(e.eventType) === 'success');
+  const unsuccessful = passes.filter(e => getPassOutcome(e.eventType) === 'failure');
+  const mirroredSecondHalf = rawPasses.filter(
+    e => typeof e.videoTimestamp === 'number' && e.videoTimestamp >= HALF_DURATION_SEC,
+  ).length;
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const titleY = 50;
+  plainText(ctx, options.teamName, W / 2, titleY, options.teamColor || successColor, 64, {
+    weight: 'bold',
+    align: 'center',
+  });
+  plainText(ctx, options.subtitle, W / 2, titleY + 76, fc, 36, {
+    weight: 'bold',
+    align: 'center',
+  });
+
+  const legendY = 195;
+  let legendX = W * 0.12;
+  filledCircle(ctx, legendX, legendY + 6, 11, successColor, fc, 2);
+  plainText(ctx, `Successful (${successful.length})`, legendX + 22, legendY - 8, fc, 24);
+  legendX += ctx.measureText(`Successful (${successful.length})`).width + 70;
+  filledCircle(ctx, legendX, legendY + 6, 11, failureColor, fc, 2);
+  plainText(ctx, `Unsuccessful (${unsuccessful.length})`, legendX + 22, legendY - 8, fc, 24);
+
+  const dirX0 = W * 0.88;
+  const dirX1 = W * 0.90;
+  drawArrow(ctx, dirX0 - 40, legendY + 6, dirX1, legendY + 6, SHOT_GREY, 2.4, 14);
+  plainText(ctx, 'Attack', dirX0, legendY + 22, SHOT_GREY, 20, { align: 'center' });
+
+  const pitchAspect = PL / PW;
+  const pitchPadX = 100;
+  const pitchPadTop = 250;
+  const pitchPadBot = 200;
+  const availW = W - pitchPadX * 2;
+  const availH = H - pitchPadTop - pitchPadBot;
+  let pitchW: number;
+  let pitchH: number;
+  if (availW / pitchAspect <= availH) {
+    pitchW = availW;
+    pitchH = availW / pitchAspect;
+  } else {
+    pitchH = availH;
+    pitchW = availH * pitchAspect;
+  }
+  const pitchRect: Rect = {
+    x: (W - pitchW) / 2,
+    y: pitchPadTop,
+    w: pitchW,
+    h: pitchH,
+  };
+  drawFullPitch(ctx, pitchRect, bg, fc);
+
+  const clampX = (x: number) => Math.max(0, Math.min(100, x));
+  const clampY = (y: number) => Math.max(0, Math.min(100, y));
+
+  for (const pass of passes) {
+    const isSuccessful = getPassOutcome(pass.eventType) === 'success';
+    const color = isSuccessful ? successColor : failureColor;
+
+    const startX = clampX(pass.startX);
+    const startY = clampY(pass.startY);
+    const [sx, sy] = optaFull(startX, startY, pitchRect);
+
+    const hasEnd = !(pass.endX === 0 && pass.endY === 0);
+    const endX = hasEnd ? clampX(pass.endX) : startX;
+    const endY = hasEnd ? clampY(pass.endY) : startY;
+    const [ex, ey] = optaFull(endX, endY, pitchRect);
+
+    drawArrow(ctx, sx, sy, ex, ey, color, 3.8, 12, bg);
+    filledCircle(ctx, sx, sy, 7.5, color, fc, 2);
+
+    if (hasEnd) {
+      if (isSuccessful) {
+        diamond(ctx, ex, ey, 8.5, color, fc, 2);
+      } else {
+        const size = 8.5;
+        line(ctx, ex - size, ey - size, ex + size, ey + size, color, 3.2);
+        line(ctx, ex - size, ey + size, ex + size, ey - size, color, 3.2);
+      }
+    }
+  }
+
+  const statsY = pitchRect.y + pitchRect.h + 44;
+  plainText(ctx, `Passes (${passes.length})`, W / 2, statsY, options.teamColor || successColor, 50, {
+    weight: 'bold',
+    align: 'center',
+  });
+  plainText(ctx, `${successful.length} successful • ${unsuccessful.length} unsuccessful`, W / 2, statsY + 52, fc, 28, {
+    align: 'center',
+  });
+  if (mirroredSecondHalf > 0) {
+    plainText(ctx, `${mirroredSecondHalf} second-half pass${mirroredSecondHalf !== 1 ? 'es' : ''} mirrored`, W / 2, statsY + 92, SHOT_GREY, 22, {
+      align: 'center',
+    });
+  }
 }
 
 export function renderDriveSlipMap(
