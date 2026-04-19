@@ -13,6 +13,7 @@ export function VideoPlayer() {
   const [sourceType, setSourceType] = useState<'local' | 'youtube' | null>(null);
   const [showSourceMenu, setShowSourceMenu] = useState(false);
   const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [youtubeError, setYoutubeError] = useState<string | null>(null);
   const { currentVideoTime, setCurrentVideoTime } = useEvents();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -27,13 +28,24 @@ export function VideoPlayer() {
 
   const handleYoutubeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setYoutubeUrl(e.target.value);
+    if (youtubeError) {
+      setYoutubeError(null);
+    }
   };
 
   const handleYoutubeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setVideoSrc(youtubeUrl);
+    const embedUrl = getYoutubeEmbedUrl(youtubeUrl.trim());
+    if (!embedUrl) {
+      setVideoSrc(null);
+      setYoutubeError('Enter a valid YouTube URL or video ID.');
+      return;
+    }
+
+    setVideoSrc(embedUrl);
     setSourceType('youtube');
     setIsPlaying(false);
+    setYoutubeError(null);
   };
 
   const handleTimeUpdate = useCallback(() => {
@@ -113,6 +125,7 @@ export function VideoPlayer() {
     setSourceType(type);
     setVideoSrc(null);
     setYoutubeUrl('');
+    setYoutubeError(null);
     setIsPlaying(false);
     setDuration(0);
     setPlaybackRate(1);
@@ -203,12 +216,15 @@ export function VideoPlayer() {
             >
               Load YouTube Video
             </button>
+            {youtubeError && (
+              <p className="text-xs text-red-300">{youtubeError}</p>
+            )}
             {sourceType === 'youtube' && videoSrc && (
               <div className="absolute inset-0 w-full h-full flex items-center justify-center">
                 <iframe
                   width="100%"
                   height="100%"
-                  src={getYoutubeEmbedUrl(videoSrc)}
+                  src={videoSrc}
                   title="YouTube video player"
                   frameBorder="0"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -282,11 +298,44 @@ export function VideoPlayer() {
 
   // Helper to convert YouTube URL to embed URL
   function getYoutubeEmbedUrl(url: string) {
-    // Accepts full YouTube URLs and extracts the video ID
-    const match = url.match(
-      /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([\w-]{11})/
-    );
-    const videoId = match ? match[1] : '';
-    return videoId ? `https://www.youtube.com/embed/${videoId}` : '';
+    const input = url.trim();
+    if (!input) return '';
+
+    // Allow users to paste the raw 11-char YouTube ID.
+    if (/^[a-zA-Z0-9_-]{11}$/.test(input)) {
+      return `https://www.youtube.com/embed/${input}`;
+    }
+
+    const normalized = /^https?:\/\//i.test(input) ? input : `https://${input}`;
+
+    try {
+      const parsed = new URL(normalized);
+      const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
+
+      if (hostname === 'youtu.be') {
+        const id = parsed.pathname.replace(/^\//, '').split('/')[0];
+        return /^[a-zA-Z0-9_-]{11}$/.test(id) ? `https://www.youtube.com/embed/${id}` : '';
+      }
+
+      if (hostname === 'youtube.com' || hostname === 'm.youtube.com' || hostname === 'music.youtube.com') {
+        const fromQuery = parsed.searchParams.get('v');
+        if (fromQuery && /^[a-zA-Z0-9_-]{11}$/.test(fromQuery)) {
+          return `https://www.youtube.com/embed/${fromQuery}`;
+        }
+
+        const segments = parsed.pathname.split('/').filter(Boolean);
+        const markerIndex = segments.findIndex(s => s === 'embed' || s === 'shorts' || s === 'live' || s === 'v');
+        if (markerIndex >= 0) {
+          const candidate = segments[markerIndex + 1] || '';
+          return /^[a-zA-Z0-9_-]{11}$/.test(candidate)
+            ? `https://www.youtube.com/embed/${candidate}`
+            : '';
+        }
+      }
+    } catch {
+      return '';
+    }
+
+    return '';
   }
 }
